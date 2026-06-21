@@ -1,0 +1,25 @@
+use_bias: true
+
+archs:
+  - _target_: metanca.nn.MultiLayerPerceptron
+    layer_specs: [10]
+    activation: leaky_relu
+    final_layer_activation: identity
+    use_bias: ${model.use_bias}
+  - _target_: metanca.nn.MultiLayerPerceptron
+    layer_specs: [30, 10]
+    activation: leaky_relu
+    final_layer_activation: identity
+    use_bias: ${model.use_bias}
+  - _target_: metanca.nn.MultiLayerPerceptron
+    layer_specs: [50, 30, 10]
+    activation: leaky_relu
+    final_layer_activation: identity
+    use_bias: ${model.use_bias}
+
+test_arch:
+  _target_: metanca.nn.MultiLayerPerceptron
+  layer_specs: [50, 50, 10]
+  activation: leaky_relu
+  final_layer_activation: identity
+  use_bias: ${model.use_bias}

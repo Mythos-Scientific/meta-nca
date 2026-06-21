@@ -1,0 +1,1228 @@
+[
+  {
+    "id": "add::forward::xW1 + b1 -- focus=W1; neighbor=b1",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "add",
+    "test": {
+      "focus_shape": [
+        8,
+        10
+      ],
+      "neighbor_shape": [
+        10
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        5,
+        6
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 1,
+          "stride": 10,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 10,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "add::forward::conv(x, W1) + b1; focus=W1; neighbor=b1",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "add",
+    "test": {
+      "focus_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "neighbor_shape": [
+        4
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        2,
+        3,
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "mul::forward::xW1 + b1 -- focus=W1; neighbor=b1",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "mul",
+    "test": {
+      "focus_shape": [
+        8,
+        10
+      ],
+      "neighbor_shape": [
+        10
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        5,
+        6
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 1,
+          "stride": 10,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 10,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "sub::forward::xW1 + b1 -- focus=W1; neighbor=b1",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "sub",
+    "test": {
+      "focus_shape": [
+        8,
+        10
+      ],
+      "neighbor_shape": [
+        10
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        5,
+        6
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 1,
+          "stride": 10,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 10,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "mul::forward::conv(x, W1) + b1; focus=W1; neighbor=b1",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "mul",
+    "test": {
+      "focus_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "neighbor_shape": [
+        4
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        2,
+        3,
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "sub::forward::conv(x, W1) + b1; focus=W1; neighbor=b1",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "sub",
+    "test": {
+      "focus_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "neighbor_shape": [
+        4
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        2,
+        3,
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "add::forward::elementwise same-rank; focus=gamma; neighbor=beta",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "add",
+    "test": {
+      "focus_shape": [
+        16
+      ],
+      "neighbor_shape": [
+        16
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        7
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 1,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 1,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "mul::forward::elementwise same-rank; focus=gamma; neighbor=beta",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "mul",
+    "test": {
+      "focus_shape": [
+        16
+      ],
+      "neighbor_shape": [
+        16
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        7
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 1,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 1,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "sub::forward::elementwise same-rank; focus=gamma; neighbor=beta",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "sub",
+    "test": {
+      "focus_shape": [
+        16
+      ],
+      "neighbor_shape": [
+        16
+      ],
+      "factory_kwargs": {},
+      "indices": [
+        7
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 1,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 1,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::forward::conv(conv(x, W1) + b1, W2) -- focus=W1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        4,
+        5
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "direct-indirect"
+      },
+      "indices": [
+        2,
+        3,
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 2,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::forward::conv(xW1 + b1, W2) -- focus=W1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        2,
+        3
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "direct-indirect"
+      },
+      "indices": [
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 1,
+          "stride": 3,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 2,
+          "stride": 3,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::forward::conv(x, W1) + b1 -- focus=b1; neighbor=W1",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        4
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "direct-direct"
+      },
+      "indices": [
+        3
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::forward::conv(conv(x, W1) + b1, W2) -- focus=b1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        4
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        4,
+        3
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "direct-indirect"
+      },
+      "indices": [
+        3
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 2,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::forward::conv(xW1 + b1, W2) -- focus=b1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        4
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        4,
+        3
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "direct-indirect"
+      },
+      "indices": [
+        3
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 2,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::forward::(xW1 + b1)W2 -- focus=W1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        2,
+        2
+      ],
+      "neighbor_shape": [
+        2,
+        3
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "direct-indirect"
+      },
+      "indices": [
+        0,
+        1
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 1,
+          "stride": 2,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 2,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::forward::(xW1 + b1)W2 -- focus=b1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        4
+      ],
+      "neighbor_shape": [
+        4,
+        5
+      ],
+      "indices": [
+        3
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "direct-indirect"
+      },
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::forward::(xW1 + b1) -- focus=b1; neighbor=W1",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        5
+      ],
+      "neighbor_shape": [
+        4,
+        5
+      ],
+      "indices": [
+        3
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "direct-direct"
+      },
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 5,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 1,
+          "stride": 5,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::forward::flatten(conv(x, W1))W2 -- focus=W1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "neighbor_shape": [
+        100,
+        16
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "direct-indirect"
+      },
+      "indices": [
+        2,
+        3,
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 100
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::forward::flatten(maxpool(conv(x, W1)))W2 -- focus=W1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "neighbor_shape": [
+        50,
+        16
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "direct-indirect"
+      },
+      "indices": [
+        2,
+        3,
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 50
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::forward::flatten(conv(x, W1) + b1)W2 -- focus=b1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        4
+      ],
+      "neighbor_shape": [
+        100,
+        16
+      ],
+      "indices": [
+        3
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "direct-indirect"
+      },
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 100
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::forward::flatten(maxpool(conv(x, W1)) + b1)W2; focus=b1; neighbor=W2",
+    "strategy_realm": "forward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        4
+      ],
+      "neighbor_shape": [
+        50,
+        16
+      ],
+      "indices": [
+        3
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "direct-indirect"
+      },
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 50
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::backward::conv(conv, W1) + b1, W2) -- focus=W2, neighbor=W1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        5,
+        5,
+        4,
+        5
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        2,
+        3,
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 2,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::backward::flatten(conv(x, W1)) dot W2 -- focus=W2, neighbor=W1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        100,
+        5
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        3,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 100
+        },
+        "neighbor": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::backward::flatten(maxpool(conv(x, W1), poolsize)) dot W2 -- focus=W2, neighbor=W1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        50,
+        16
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        3,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 50
+        },
+        "neighbor": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::backward::flatten(maxpool(conv(x, W1) + b1, poolsize) dot W2 -- focus=W2; neighbor=b1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        50,
+        16
+      ],
+      "neighbor_shape": [
+        4
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        3,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 50
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "conv_general_dilated::backward::conv(conv(x, W1) + b1, W2) -- focus=W2; neighbor=b1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "conv_general_dilated",
+    "test": {
+      "focus_shape": [
+        5,
+        5,
+        4,
+        5
+      ],
+      "neighbor_shape": [
+        4
+      ],
+      "factory_kwargs": {
+        "rhs_spec": [
+          3,
+          2,
+          0,
+          1
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        2,
+        3,
+        1,
+        2
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 2,
+          "stride": 4,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::backward::(xW1 + b1)W2 -- focus=W2; neighbor=b1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        2,
+        3
+      ],
+      "neighbor_shape": [
+        2
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        1,
+        1
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 2,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 2,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::backward::(xW1 + b1)W2 -- focus=W2; neighbor=W1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        2,
+        2
+      ],
+      "neighbor_shape": [
+        3,
+        2
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        0,
+        1
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 2,
+          "slice_size": 1
+        },
+        "neighbor": {
+          "index_dim": 1,
+          "stride": 2,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::backward::flatten(maxpool(conv(x, W1) + b1))W2 -- focus=W2; neighbor=b1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        50,
+        16
+      ],
+      "neighbor_shape": [
+        4
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        3,
+        4
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 50
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::backward::flatten(maxpool(conv(x, W1) + b1))W2 -- focus=W2; neighbor=W1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        50,
+        16
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        3,
+        4
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 50
+        },
+        "neighbor": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::backward::flatten(conv(x, W1) + b1)W2 -- focus=W2; neighbor=b1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        60,
+        16
+      ],
+      "neighbor_shape": [
+        4
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        3,
+        4
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 60
+        },
+        "neighbor": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "dot_general::backward::flatten(conv(x, W1) + b1)W2 -- focus=W2; neighbor=W1",
+    "strategy_realm": "backward_slice_info",
+    "strategy_name": "dot_general",
+    "test": {
+      "focus_shape": [
+        50,
+        16
+      ],
+      "neighbor_shape": [
+        5,
+        5,
+        3,
+        4
+      ],
+      "factory_kwargs": {
+        "contraction_axes": [
+          [
+            1,
+            0
+          ]
+        ],
+        "context": "indirect-direct"
+      },
+      "indices": [
+        3,
+        4
+      ],
+      "slice_info": {
+        "focus": {
+          "index_dim": 0,
+          "stride": 4,
+          "slice_size": 50
+        },
+        "neighbor": {
+          "index_dim": 3,
+          "stride": 4,
+          "slice_size": 1
+        }
+      }
+    }
+  }
+]

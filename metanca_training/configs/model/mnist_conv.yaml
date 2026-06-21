@@ -1,0 +1,40 @@
+use_bias: true
+
+# Train architectures at opposite ends of architecture line segment
+# Test architecture (m=0.2) is in the middle
+archs:
+  # Smaller end: m=0.1 multiplier
+  - _target_: metanca.nn.ConvMLP
+    conv_layer_specs:
+      - [2, [3, 3], [2, 2], [2, 2]]
+      - [4, [3, 3], [2, 2], [2, 2]]
+    mlp_layer_specs: [32, 10] # int(320 * 0.1), output_shape
+    conv_use_bias: ${model.use_bias}
+    mlp_use_bias: ${model.use_bias}
+    padding: VALID
+    strides: 1
+    activation: leaky_relu
+  # Larger end: m=0.3 multiplier
+  - _target_: metanca.nn.ConvMLP
+    conv_layer_specs:
+      - [6, [3, 3], [2, 2], [2, 2]]
+      - [12, [3, 3], [2, 2], [2, 2]]
+    mlp_layer_specs: [96, 10] # int(320 * 0.3), output_shape
+    conv_use_bias: ${model.use_bias}
+    mlp_use_bias: ${model.use_bias}
+    padding: VALID
+    strides: 1
+    activation: leaky_relu
+
+# Test architecture: m=0.2 multiplier (middle of the line segment)
+test_arch:
+  _target_: metanca.nn.ConvMLP
+  conv_layer_specs:
+    - [4, [3, 3], [2, 2], [2, 2]]
+    - [8, [3, 3], [2, 2], [2, 2]]
+  mlp_layer_specs: [64, 10] # int(320 * 0.2), output_shape
+  conv_use_bias: ${model.use_bias}
+  mlp_use_bias: ${model.use_bias}
+  padding: VALID
+  strides: 1
+  activation: leaky_relu

@@ -1,0 +1,12 @@
+defaults:
+  - _self_
+  - dataset: mnist
+  - model: mnist
+  - training: regular_net
+  - checkpoint: regular_net
+  - wandb: default
+
+random:
+  seed: 0
+
+code_testing: false

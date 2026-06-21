@@ -1,0 +1,3 @@
+checkpoint_dir: regular_net_checkpoints
+run_name: no_name
+save_top_n: 0

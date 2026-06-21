@@ -1,0 +1,60 @@
+use_bias: true
+
+# Large 3-layer convolutional task networks used for the kernel-size generalization
+# experiment (MNIST). Channel widths follow (32m, 64m, 128m) for a filter multiplier m;
+# here m=2 gives channels (64, 128, 256). A dense hidden layer of h units precedes the
+# 10-way output (here h=256).
+#
+# Pooling: the first conv layer does NOT pool ([1,1] window/stride = identity); the
+# second and third layers pool 2x2 (stride 2). This is required so VALID padding stays
+# valid across kernel sizes 3/4/5 (pooling after every layer collapses the 28x28 maps
+# for k>=4). With VALID padding, larger kernels shrink the spatial map more, so they
+# yield fewer parameters. Approximate parameter counts at m=2, h=256:
+#   k=3 ~2.01M, k=4 ~1.71M, k=5 ~1.62M ("up to 2 million parameters").
+#
+# The two training architectures use kernel size 3 and kernel size 5; kernel size 4 is
+# held out as a separate evaluation (generalization to an unseen kernel size).
+#
+# NOTE: the original pre-Hydra config for this experiment was not saved; these values
+# reconstruct the paper's description (VALID padding, pooling on the last two layers,
+# channel multiplier m, dense width h). Adjust m and h to match the exact run.
+
+archs:
+  # Training architecture 1: kernel size 3
+  - _target_: metanca.nn.ConvMLP
+    conv_layer_specs:
+      - [64,  [3, 3], [1, 1], [1, 1]]
+      - [128, [3, 3], [2, 2], [2, 2]]
+      - [256, [3, 3], [2, 2], [2, 2]]
+    mlp_layer_specs: [256, 10]
+    conv_use_bias: ${model.use_bias}
+    mlp_use_bias: ${model.use_bias}
+    padding: VALID
+    strides: 1
+    activation: leaky_relu
+  # Training architecture 2: kernel size 5
+  - _target_: metanca.nn.ConvMLP
+    conv_layer_specs:
+      - [64,  [5, 5], [1, 1], [1, 1]]
+      - [128, [5, 5], [2, 2], [2, 2]]
+      - [256, [5, 5], [2, 2], [2, 2]]
+    mlp_layer_specs: [256, 10]
+    conv_use_bias: ${model.use_bias}
+    mlp_use_bias: ${model.use_bias}
+    padding: VALID
+    strides: 1
+    activation: leaky_relu
+
+# Held-out test architecture: kernel size 4 (unseen during meta-training)
+test_arch:
+  _target_: metanca.nn.ConvMLP
+  conv_layer_specs:
+    - [64,  [4, 4], [1, 1], [1, 1]]
+    - [128, [4, 4], [2, 2], [2, 2]]
+    - [256, [4, 4], [2, 2], [2, 2]]
+  mlp_layer_specs: [256, 10]
+  conv_use_bias: ${model.use_bias}
+  mlp_use_bias: ${model.use_bias}
+  padding: VALID
+  strides: 1
+  activation: leaky_relu

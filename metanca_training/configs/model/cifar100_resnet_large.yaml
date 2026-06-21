@@ -1,0 +1,29 @@
+archs:
+  - _target_: metanca.nn.ResNet
+    num_classes: 100
+    stage_blocks: [2, 2, 2]
+    base_channels: 240
+    use_bn: false
+    bn_momentum: 0.9
+    bn_epsilon: 1e-5
+    act: relu
+
+  - _target_: metanca.nn.ResNet
+    num_classes: 100
+    stage_blocks: [2, 2, 2]
+    base_channels: 272
+    use_bn: false
+    bn_momentum: 0.9
+    bn_epsilon: 1e-5
+    act: relu
+
+
+test_arch:
+  _target_: metanca.nn.ResNet
+  num_classes: 100
+  stage_blocks: [2, 2, 2]
+  base_channels: 256
+  use_bn: false
+  bn_momentum: 0.9
+  bn_epsilon: 1e-5
+  act: relu

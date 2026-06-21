@@ -1,0 +1,14 @@
+numpy
+scipy
+wandb
+frozendict
+
+ipython
+jupyter
+matplotlib
+
+opt-einsum
+pandas
+scikit-learn
+tqdm
+networkx

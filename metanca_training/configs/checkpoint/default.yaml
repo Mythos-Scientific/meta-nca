@@ -1,0 +1,4 @@
+checkpoint_dir: local_rule_checkpoints
+run_name: no_name
+save_top_n: 0
+load_local_rule_net: null

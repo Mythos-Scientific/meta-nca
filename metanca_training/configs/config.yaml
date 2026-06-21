@@ -1,0 +1,20 @@
+defaults:
+  - _self_
+  - dataset: mnist
+  - model: mnist
+  - training: default
+  - positional_encoding: default
+  - local_rule: default
+  - logging: default
+  - checkpoint: default
+  - wandb: default
+
+# Random seed
+random:
+  seed: 0
+
+# Legacy flags (can be deprecated over time)
+code_testing: false
+linearly_separable: false
+add_pos_enc: false
+zero_out: 0.0

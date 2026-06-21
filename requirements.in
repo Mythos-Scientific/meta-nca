@@ -1,0 +1,16 @@
+jax[cuda12]
+jax-ai-stack
+tensorflow-datasets
+numpy
+scipy
+wandb
+frozendict
+
+ipython
+jupyter
+matplotlib
+
+opt-einsum
+pandas
+scikit-learn
+tqdm

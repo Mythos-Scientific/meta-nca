@@ -1,0 +1,41 @@
+use_bias: true
+
+# Small architectures for memory-constrained BPTT training
+# 32x32 -> pool -> 16x16 -> pool -> 8x8, then flatten
+# Flatten sizes: m=0.1: 8*8*4=256, m=0.3: 8*8*12=768
+archs:
+  # Smaller end
+  - _target_: metanca.nn.ConvMLP
+    conv_layer_specs:
+      - [2, [3, 3], [2, 2], [2, 2]]
+      - [4, [3, 3], [2, 2], [2, 2]]
+    mlp_layer_specs: [32, 100]
+    conv_use_bias: ${model.use_bias}
+    mlp_use_bias: ${model.use_bias}
+    padding: VALID
+    strides: 1
+    activation: leaky_relu
+
+  - _target_: metanca.nn.ConvMLP
+    conv_layer_specs:
+      - [6, [3, 3], [2, 2], [2, 2]]
+      - [12, [3, 3], [2, 2], [2, 2]]
+    mlp_layer_specs: [96, 100]
+    conv_use_bias: ${model.use_bias}
+    mlp_use_bias: ${model.use_bias}
+    padding: VALID
+    strides: 1
+    activation: leaky_relu
+
+# Test architecture (middle)
+test_arch:
+  _target_: metanca.nn.ConvMLP
+  conv_layer_specs:
+    - [4, [3, 3], [2, 2], [2, 2]]
+    - [8, [3, 3], [2, 2], [2, 2]]
+  mlp_layer_specs: [64, 100]
+  conv_use_bias: ${model.use_bias}
+  mlp_use_bias: ${model.use_bias}
+  padding: VALID
+  strides: 1
+  activation: leaky_relu

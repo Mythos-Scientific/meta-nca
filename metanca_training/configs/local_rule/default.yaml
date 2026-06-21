@@ -1,0 +1,2 @@
+# Hidden layers only - input/output computed from hidden_state_dim at runtime
+hidden_layers: [100, 200, 100]

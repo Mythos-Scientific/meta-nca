@@ -1,0 +1,3 @@
+num_epochs: 1
+regular_net_arch_selection: train
+train_test_arch_regular_net: false

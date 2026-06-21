@@ -1,0 +1,4 @@
+name: cifar100
+input_shape: [32, 32, 3]
+output_shape: 100
+batch_size: 512
