@@ -92,7 +92,7 @@ pytest metanca/ metanca_training/
 ## License
 
 Licensed under the Apache License, Version 2.0 — see [`LICENSE`](LICENSE).
-Copyright © 2026 Meet Barot, Daniel Berenberg, and Sina Khajehabdollahi.
+Copyright © 2026 Mythos Scientific.
 
 The paper itself is published under a Creative Commons Attribution 4.0
 International (CC BY 4.0) license.
