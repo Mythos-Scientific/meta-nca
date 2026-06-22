@@ -91,5 +91,8 @@ pytest metanca/ metanca_training/
 
 ## License
 
-TODO: add a code license (e.g., MIT or Apache-2.0). The paper itself is
-© 2026 the authors, published under CC BY 4.0.
+Licensed under the Apache License, Version 2.0 — see [`LICENSE`](LICENSE).
+Copyright © 2026 Meet Barot, Daniel Berenberg, and Sina Khajehabdollahi.
+
+The paper itself is published under a Creative Commons Attribution 4.0
+International (CC BY 4.0) license.
