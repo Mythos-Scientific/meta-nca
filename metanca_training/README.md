@@ -66,7 +66,7 @@ Hydra is the public control surface for the package. The config schema is define
 - `dataset/`
   - `iris.yaml`
   - `mnist_image.yaml`
-  - `mnis_flat.yaml`
+  - `mnist_flat.yaml`
   - `cifar100.yaml`
   - `imagenet.yaml`
 - `model/`
@@ -87,7 +87,7 @@ Implementation details worth knowing:
 
 - Structured configs are registered before Hydra initializes, so config validation happens against the dataclass schema.
 - The model configs describe raw Flax modules. They are not serialized `TaskNet`s.
-- The dataset preset names in the tree are the actual Hydra group names. In practice it is safest to pass `dataset=...` explicitly because the checked-in root configs and some script docstrings still mention `dataset: mnist`, while the concrete dataset presets are `mnist_image` and `mnis_flat`.
+- The dataset preset names in the tree are the actual Hydra group names. In practice it is safest to pass `dataset=...` explicitly because the checked-in root configs and some script docstrings still mention `dataset: mnist`, while the concrete dataset presets are `mnist_image` and `mnist_flat`.
 - The checked-in MetaNCA training group currently contains only `training/default.yaml`; `training/regular_net.yaml` belongs to the baseline script.
 - `training.num_metaepochs` is the outer optimization loop.
 - With `training.update_step_scheduler_type=constant`, `training.num_epochs` is the fixed number of TaskNet local-rule update steps.

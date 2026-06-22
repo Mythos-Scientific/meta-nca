@@ -39,13 +39,13 @@ Hydra entry point: `metanca_training/scripts/train.py`. Config groups live in
 
 ```bash
 # Dense MLPs on MNIST
-python metanca_training/scripts/train.py dataset=mnis_flat model=mnist wandb=disabled
+python metanca_training/scripts/train.py dataset=mnist_flat model=mnist wandb=disabled
 
 # ResNets on CIFAR-100
 python metanca_training/scripts/train.py dataset=cifar100 model=cifar100_resnet wandb=disabled
 ```
 
-Useful config groups: `dataset=` (`mnis_flat`, `mnist_image`, `cifar100`, `iris`),
+Useful config groups: `dataset=` (`mnist_flat`, `mnist_image`, `cifar100`, `iris`),
 `model=` (`mnist`, `mnist_conv`, `cifar100_resnet`, …), `positional_encoding=`,
 `local_rule=`, `training=`. See `metanca_training/configs/` for all options.
 
@@ -63,7 +63,7 @@ python metanca_training/scripts/train_regular_net.py \
 
 | Experiment | dataset | model config |
 |------------|---------|--------------|
-| Dense MLPs | `mnis_flat` | `mnist` |
+| Dense MLPs | `mnist_flat` | `mnist` |
 | Convolutional nets | `mnist_image` | `mnist_conv_large` |
 | ResNets | `cifar100` | `cifar100_resnet` |
 
