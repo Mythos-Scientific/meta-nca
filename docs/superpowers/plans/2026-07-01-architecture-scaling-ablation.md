@@ -624,7 +624,7 @@ from metanca_training import train_metanca
 from metanca_training.data_utils import get_iris_datasets, prepare_batches
 from metanca_training.scaling.arch_grid import build_mlp
 
-CONFIG_DIR = str((Path(__file__).parents[3] / "configs").resolve())
+CONFIG_DIR = str((Path(__file__).parents[2] / "configs").resolve())  # metanca_training/configs
 
 
 def test_train_metanca_returns_params_and_vars():
@@ -704,7 +704,7 @@ from metanca_training.scaling.arch_grid import build_mlp
 from metanca_training.scaling.hidden_state import grid_hidden_state_initializer
 from metanca_training.scaling.evaluate_pool import evaluate_arch_pool
 
-CONFIG_DIR = str((Path(__file__).parents[4] / "configs").resolve())
+CONFIG_DIR = str((Path(__file__).parents[3] / "configs").resolve())  # metanca_training/configs
 
 
 def test_evaluate_arch_pool_rows():
