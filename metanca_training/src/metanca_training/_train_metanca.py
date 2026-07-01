@@ -50,6 +50,7 @@ def before_metanca_training(
     models: list[nn.Module],
     test_model: nn.Module,
     rand_key: chex.PRNGKey,
+    shared_initializer: tuple | None = None,
 ) -> TrainingVars:
     input_shape = tuple(cfg.dataset.input_shape)
     n_spatial_dims = _n_spatial_dims(input_shape)
@@ -72,6 +73,7 @@ def before_metanca_training(
         d_neuron=cfg.positional_encoding.d_neuron,
         d_layer=cfg.positional_encoding.d_layer,
         d_spatial=cfg.positional_encoding.d_spatial,
+        shared_initializer=shared_initializer,
     )
 
     # TODO: could configure this if we wanted.
@@ -174,6 +176,7 @@ def train_metanca(
     cfg: DictConfig,
     models: list[nn.Module],
     test_model: nn.Module,
+    shared_initializer: tuple | None = None,
 ):
     logger.info("Hydra training config:\n%s", cfg)
     input_shape = tuple(cfg.dataset.input_shape)
@@ -183,6 +186,7 @@ def train_metanca(
         models=models,
         test_model=test_model,
         rand_key=jax.random.key(cfg.random.seed),
+        shared_initializer=shared_initializer,
     )
 
     devices = jax.devices()
@@ -207,16 +211,16 @@ def train_metanca(
     opt_state = training_vars.optimizer_state
     rand_key = jax.random.key(cfg.random.seed)
 
-    callback_runner = CallbackRunner.create(
-        [
-            create_accuracy_callback(),
+    callbacks = [create_accuracy_callback()]
+    if getattr(cfg.training, "early_stopping_enabled", True):
+        callbacks.append(
             create_early_stopping(
                 monitor="val/loss",
                 patience=getattr(cfg.training, "early_stopping_patience", 10),
                 mode="min",
-            ),
-        ]
-    )
+            )
+        )
+    callback_runner = CallbackRunner.create(callbacks)
     ctx = TrainingContext(
         n_batches=n_train_batches,
         local_rule_params=local_rule_params,
@@ -592,3 +596,4 @@ def train_metanca(
 
     # Finalize callbacks
     callback_runner, _ = callback_runner.on_train_end(ctx)
+    return local_rule_params, training_vars

@@ -307,6 +307,7 @@ class TaskNet:
         d_neuron: int = 2,
         d_layer: int = 2,
         d_spatial: int = 2,
+        shared_initializer: Optional[tuple[mhx.HiddenStateInitializer, int]] = None,
     ) -> list["TaskNet"]:
         """Build multiple TaskNets with a shared hidden state initializer.
 
@@ -330,49 +331,51 @@ class TaskNet:
         """
         n_spatial_dims = max(map(len, input_shapes)) - 1  # 1 would be the channel dim
 
-        # First pass: collect all layer shapes across all architectures to compute
-        # unified initializer dimensions
-        all_layer_shapes = {}
-        max_n_layers = 0
-        probe_key, key = jax.random.split(key)
-        probe_keys = jax.random.split(probe_key, len(models))
+        if shared_initializer is None:
+            # First pass: collect all layer shapes across all architectures to compute
+            # unified initializer dimensions
+            all_layer_shapes = {}
+            max_n_layers = 0
+            probe_key, key = jax.random.split(key)
+            probe_keys = jax.random.split(probe_key, len(models))
 
-        for model, input_shape, probe_key in zip(models, input_shapes, probe_keys):
-            dummy_input = jnp.zeros((1, *input_shape))
-            params = model.init(probe_key, dummy_input)
-            flattened = mfx.flatten_params(params)
-            layer_shapes = jax.tree.map(lambda x: x.shape, params)
+            for model, input_shape, probe_key in zip(models, input_shapes, probe_keys):
+                dummy_input = jnp.zeros((1, *input_shape))
+                params = model.init(probe_key, dummy_input)
+                flattened = mfx.flatten_params(params)
+                layer_shapes = jax.tree.map(lambda x: x.shape, params)
 
-            for name, _ in flattened:
-                shape = mfx.nested_get(name, layer_shapes)
-                # Track the maximum shape for each dimension position
-                if name not in all_layer_shapes:
-                    all_layer_shapes[name] = shape
-                else:
-                    # Take element-wise max of shapes
-                    existing = all_layer_shapes[name]
-                    all_layer_shapes[name] = tuple(max(e, s) for e, s in zip(existing, shape))
+                for name, _ in flattened:
+                    shape = mfx.nested_get(name, layer_shapes)
+                    # Track the maximum shape for each dimension position
+                    if name not in all_layer_shapes:
+                        all_layer_shapes[name] = shape
+                    else:
+                        # Take element-wise max of shapes
+                        existing = all_layer_shapes[name]
+                        all_layer_shapes[name] = tuple(max(e, s) for e, s in zip(existing, shape))
 
-            # Count layers for this architecture
-            layer_names = mhx.get_layer_names_from_shapes(
-                {name: mfx.nested_get(name, layer_shapes) for name, _ in flattened}
+                # Count layers for this architecture
+                layer_names = mhx.get_layer_names_from_shapes(
+                    {name: mfx.nested_get(name, layer_shapes) for name, _ in flattened}
+                )
+                max_n_layers = max(max_n_layers, len(layer_names))
+
+            # Create a unified initializer using maximum dimensions across all architectures
+            unified_initializer, unified_hidden_dim = mhx.create_unified_initializer(
+                all_layer_shapes,
+                max_n_layers=max_n_layers,
+                d_spatial=d_spatial,
+                d_layer=d_layer,
+                d_neuron=d_neuron,
+                n_spatial_dims=n_spatial_dims,
             )
-            max_n_layers = max(max_n_layers, len(layer_names))
 
-        # Create a unified initializer using maximum dimensions across all architectures
-        unified_initializer, unified_hidden_dim = mhx.create_unified_initializer(
-            all_layer_shapes,
-            max_n_layers=max_n_layers,
-            d_spatial=d_spatial,
-            d_layer=d_layer,
-            d_neuron=d_neuron,
-            n_spatial_dims=n_spatial_dims,
-        )
-
-        logger.info(
-            f"Created unified initializer: hidden_dim={unified_hidden_dim}, "
-            f"max_n_layers={max_n_layers}, n_spatial_dims={n_spatial_dims}"
-        )
+            logger.info(
+                f"Created unified initializer: hidden_dim={unified_hidden_dim}, "
+                f"max_n_layers={max_n_layers}, n_spatial_dims={n_spatial_dims}"
+            )
+            shared_initializer = (unified_initializer, unified_hidden_dim)
 
         # Second pass: build TaskNets with shared initializer
         init_keys = jax.random.split(key, len(models))
@@ -382,7 +385,7 @@ class TaskNet:
             d_neuron=d_neuron,
             d_spatial=d_spatial,
             d_layer=d_layer,
-            shared_initializer=(unified_initializer, unified_hidden_dim),
+            shared_initializer=shared_initializer,
         )
 
         return [

@@ -122,6 +122,10 @@ class MetaNCATrainingHyperparamsConfig:
     update_step_scheduler_rate: int = 100
     update_step_scheduler_max_steps: Optional[int] = None
 
+    # Early stopping
+    early_stopping_enabled: bool = True
+    early_stopping_patience: int = 10
+
     # Sample pooling
     sample_pooling: SamplePoolingConfig = field(default_factory=SamplePoolingConfig)
 

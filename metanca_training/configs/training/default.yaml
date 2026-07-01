@@ -8,6 +8,9 @@ update_step_scheduler_type: increment
 update_step_scheduler_rate: 100
 update_step_scheduler_max_steps: 10
 
+early_stopping_enabled: true
+early_stopping_patience: 10
+
 sample_pooling:
   enabled: false
   pool_size: 64
