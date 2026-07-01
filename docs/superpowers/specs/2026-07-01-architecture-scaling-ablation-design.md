@@ -127,36 +127,42 @@ and recovery is a matter of re-running the same command:
 
 ## Hidden-state initialization consistency
 
-Every TaskNet's hidden states / positional encodings are produced by a **single unified
-initializer** (`TaskNet.build_many` → `create_unified_initializer`). That initializer bakes
-in buffer sizes from the maximum dimensions of the architectures it is built from, and
-**asserts `0 <= layer_idx < max_n_layers`** — so it must be built to span the **global max
-depth and width across the entire grid, including the held-out validation archs**, or
-evaluating a deeper/wider arch than the training subset saw will crash (or silently clamp).
+Every TaskNet's hidden states / positional encodings come from one initializer
+(`hidden_state_initializer`) whose buffer sizes are fixed by the maximum dims it is built
+with, and which **asserts `0 <= layer_idx < n_layers`**. The positional-encoding *values* are
+sinusoidal and position-invariant (row `i` is identical regardless of table size), so once the
+buffers are large enough, encodings are identical across archs and across train/eval. What
+matters is that the buffers are provisioned to the **grid-wide maxima**, identically for
+training and evaluation. This does **not** vary per T: every T draws from the same grid and
+shares the same fixed val set, so the provisioning is a single constant for both ablations.
 
-The positional-encoding *values* are sinusoidal and position-invariant (row `i` is identical
-regardless of table size), so once the buffers are large enough, encodings are identical
-between training and eval. Width is not the binding constraint here: every flat-MLP input
-layer has `in_dim = 784`, which dominates all hidden widths (≤ 512), so the neuron buffer is
-pinned at 784 for any arch. **Depth** is the binding constraint.
+We provision an **explicit grid-max initializer**:
 
-Design decision to guarantee coverage and train/eval consistency:
+- **Neuron-encoding table = 784 positions** = `max(input_dim=784, max_hidden_width=512)`. The
+  flattened Fashion-MNIST input makes the first layer's in-dimension 784, which exceeds the
+  max hidden width (512); the neuron table is shared across in/out neuron indices, so it must
+  cover 784.
+- **Layer-encoding table = 6 positions** = max grid depth (5 hidden layers) + 1 output layer.
+- Channel widths `d_neuron = d_layer = d_spatial = 10` (config), `n_spatial_dims = 0` for flat
+  MLPs, giving `hidden_dim = 2*d_neuron + d_layer = 30`.
 
-- Define a **spanning architecture** `SPANNING_ARCH = (512, 512, 512, 512, 512)` — the grid's
-  global max depth (5 hidden layers) at max width (512).
-- Build the training-time unified initializer so that it includes the spanning arch: the
-  driver passes `test_model = build_mlp(SPANNING_ARCH, n_classes)` to
-  `before_metanca_training`, so `build_many` computes `max_n_layers`/max-dims over
-  `{T train archs} ∪ {spanning arch}`. This is independent of which random T-subset was
-  sampled, so the initializer always spans the whole grid. The spanning arch is used only
-  for the initializer and in-loop logging — it is **not** trained on.
-- Evaluation reuses this exact initializer via
-  `training_vars.test_tasknet.hidden_state_initializer`, so every train and val arch is
-  initialized identically to training and is guaranteed in-bounds.
-- A regression test asserts (a) every arch in both grids is covered by
-  `len ≤ len(SPANNING_ARCH)` and `max width ≤ max(SPANNING_ARCH)`, and (b) building the
-  spanning-arch initializer lets the extreme archs initialize without error, while a
-  deliberately too-shallow initializer raises on a deep arch.
+A helper `grid_hidden_state_initializer(input_dim, d_neuron, d_layer, d_spatial)` builds this
+directly via `hidden_state_initializer(maximum_dims=[784, 512], n_layers=6, ...)` and returns
+`(initializer, hidden_dim)`. It is passed as the `shared_initializer` to **every** TaskNet
+build:
+
+- **Training** — `train_metanca` / `before_metanca_training` forward it to
+  `TaskNet.build_many(..., shared_initializer=...)`, so all T training tasknets (and the
+  in-loop test tasknet) use the grid-max initializer regardless of which T-subset was sampled.
+- **Evaluation** — `evaluate_arch_pool` builds each train/val arch's tasknet with the same
+  initializer (`training_vars.test_tasknet.hidden_state_initializer`), so eval matches training
+  exactly and every arch is in-bounds.
+
+This requires two small, backward-compatible core additions: an optional `shared_initializer`
+parameter on `TaskNet.build_many` (skip its internal max-dims inference when provided) and on
+`before_metanca_training` / `train_metanca` (forward it). A regression test asserts the
+grid-max initializer initializes every extreme arch without error, while a deliberately
+too-shallow initializer raises on a deep arch.
 
 ## Adam baselines
 

@@ -88,24 +88,26 @@ git commit -m "chore: set up uv env for scaling study; document GB10 JAX setup"
   - `split_grid(grid: Sequence[tuple[int, ...]], n_val: int, seed: int) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]]]` → `(pool, val)`.
   - `sample_subset(pool: Sequence[tuple[int, ...]], t: int, seed: int) -> list[tuple[int, ...]]`.
   - `N_VAL: dict[str, int] = {"fixed5": 25, "varying": 49}`.
-  - `SPANNING_ARCH: tuple[int, ...] = (512, 512, 512, 512, 512)` — grid's global max depth × max width; used to build the shared hidden-state initializer so it spans every train + val arch (see spec "Hidden-state initialization consistency").
+  - `MAX_HIDDEN_WIDTH: int` (= `max(WIDTHS)` = 512) and `MAX_HIDDEN_LAYERS: int` (= max grid depth = 5) — grid-wide maxima used to provision the explicit grid-max hidden-state initializer (Task 4 helper; see spec "Hidden-state initialization consistency").
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 # metanca_training/tests/metanca_training/scaling/test__arch_grid.py
 from metanca_training.scaling.arch_grid import (
-    WIDTHS, N_VAL, SPANNING_ARCH, enumerate_arch_widths, arch_id, arch_layer_specs,
+    WIDTHS, N_VAL, MAX_HIDDEN_WIDTH, MAX_HIDDEN_LAYERS,
+    enumerate_arch_widths, arch_id, arch_layer_specs,
     build_mlp, build_grid, split_grid, sample_subset,
 )
 
 
-def test_spanning_arch_covers_both_grids():
+def test_grid_maxima_bound_both_grids():
+    # provisioning constants must upper-bound every arch in both grids
     for kind in ("fixed5", "varying"):
         for w in build_grid(kind):
-            assert len(w) <= len(SPANNING_ARCH)        # depth covered
-            assert max(w) <= max(SPANNING_ARCH)        # width covered
-    assert len(SPANNING_ARCH) == 5 and max(SPANNING_ARCH) == max(WIDTHS)
+            assert len(w) <= MAX_HIDDEN_LAYERS          # depth covered
+            assert max(w) <= MAX_HIDDEN_WIDTH           # width covered
+    assert MAX_HIDDEN_WIDTH == max(WIDTHS) and MAX_HIDDEN_LAYERS == 5
 
 
 def test_enumerate_counts_per_depth():
@@ -196,12 +198,12 @@ N_VAL: dict[str, int] = {"fixed5": 25, "varying": 49}
 
 _GRID_DEPTHS: dict[str, list[int]] = {"fixed5": [5], "varying": [2, 3, 4, 5]}
 
-# Grid's global max depth x max width. The shared hidden-state initializer MUST be built
-# to span this (see spec "Hidden-state initialization consistency"): build_many's unified
-# initializer asserts layer_idx < max_n_layers, so a too-shallow initializer crashes when
-# evaluating a deeper val arch. Passed as the placeholder test_model so the initializer
-# always spans the whole grid regardless of which T-subset is sampled.
-SPANNING_ARCH: tuple[int, ...] = tuple([max(WIDTHS)] * max(_GRID_DEPTHS["varying"]))
+# Grid-wide maxima used to provision the explicit grid-max hidden-state initializer
+# (Task 4 `grid_hidden_state_initializer`). The initializer's layer table must cover
+# MAX_HIDDEN_LAYERS + 1 (output) positions and its neuron table max(input_dim, MAX_HIDDEN_WIDTH).
+# See spec "Hidden-state initialization consistency".
+MAX_HIDDEN_WIDTH: int = max(WIDTHS)                    # 512
+MAX_HIDDEN_LAYERS: int = max(_GRID_DEPTHS["varying"])  # 5
 
 
 def enumerate_arch_widths(
@@ -399,16 +401,22 @@ git commit -m "feat: add Fashion-MNIST dataset loader and config"
 
 ---
 
-### Task 4: `train_metanca` returns final params + training vars; disable early stopping
+### Task 4: `train_metanca` returns final params/vars; early-stop toggle; explicit grid-max initializer plumbing
 
 **Files:**
-- Modify: `metanca_training/src/metanca_training/_train_metanca.py` (return value; early-stopping toggle).
+- Modify: `metanca/src/metanca/nn/_tasknet.py` (`TaskNet.build_many`: optional `shared_initializer`).
+- Modify: `metanca_training/src/metanca_training/_train_metanca.py` (return value; early-stopping toggle; forward `shared_initializer`).
 - Modify: `metanca_training/src/metanca_training/_hydra_configs.py` (`MetaNCATrainingHyperparamsConfig`: add `early_stopping_enabled`, `early_stopping_patience`).
 - Modify: `metanca_training/configs/training/default.yaml` (add the two keys).
-- Test: `metanca_training/tests/metanca_training/test__train_metanca_returns.py`
+- Create: `metanca_training/src/metanca_training/scaling/hidden_state.py` (`grid_hidden_state_initializer`).
+- Test: `metanca_training/tests/metanca_training/test__train_metanca_returns.py`, `metanca_training/tests/metanca_training/scaling/test__build_many_shared_initializer.py`, `metanca_training/tests/metanca_training/scaling/test__grid_initializer.py`
 
 **Interfaces:**
-- Produces (used by Task 7): `train_metanca(...) -> tuple[chex.ArrayTree, TrainingVars]` (final `local_rule_params`, `training_vars`). Early stopping is skipped when `cfg.training.early_stopping_enabled` is `False`.
+- Produces (used by Tasks 5, 6, 7):
+  - `TaskNet.build_many(models, input_shapes, key, d_neuron=, d_layer=, d_spatial=, shared_initializer=None)` — when `shared_initializer=(initializer_fn, hidden_dim)` is given, it is used for every built TaskNet and the internal max-dims inference is skipped.
+  - `before_metanca_training(cfg, *, models, test_model, rand_key, shared_initializer=None)` and `train_metanca(..., shared_initializer=None)` — forward the initializer to `build_many`.
+  - `train_metanca(...) -> tuple[chex.ArrayTree, TrainingVars]` (final `local_rule_params`, `training_vars`). Early stopping is skipped when `cfg.training.early_stopping_enabled` is `False`.
+  - `grid_hidden_state_initializer(input_dim: int, d_neuron: int, d_layer: int, d_spatial: int) -> tuple[HiddenStateInitializer, int]` — builds the explicit grid-max initializer (neuron table `max(input_dim, MAX_HIDDEN_WIDTH)`, layer table `MAX_HIDDEN_LAYERS + 1`) and returns `(initializer, hidden_dim)`.
 
 - [ ] **Step 1: Add config fields**
 
@@ -449,7 +457,154 @@ At the very end of `train_metanca` (after `callback_runner, _ = callback_runner.
     return local_rule_params, training_vars
 ```
 
-- [ ] **Step 3: Write the smoke test**
+- [ ] **Step 3: Add `shared_initializer` to `TaskNet.build_many` (core)**
+
+In `metanca/src/metanca/nn/_tasknet.py`, add a `shared_initializer` parameter to `build_many`
+and skip the internal max-dims inference when it is provided. Change the signature:
+
+```python
+    @classmethod
+    def build_many(
+        cls,
+        models: list[nn.Module],
+        input_shapes: list[chex.Shape],
+        key: chex.PRNGKey,
+        d_neuron: int = 2,
+        d_layer: int = 2,
+        d_spatial: int = 2,
+        shared_initializer: Optional[tuple[mhx.HiddenStateInitializer, int]] = None,
+    ) -> list["TaskNet"]:
+```
+
+Then wrap the existing first-pass computation (everything that builds
+`unified_initializer, unified_hidden_dim`) in a guard, so it only runs when no initializer is
+supplied. Immediately after `n_spatial_dims = max(map(len, input_shapes)) - 1`, structure it as:
+
+```python
+        if shared_initializer is None:
+            # ... existing first pass: probe models, accumulate all_layer_shapes / max_n_layers,
+            # then create_unified_initializer(...) -> (unified_initializer, unified_hidden_dim) ...
+            shared_initializer = (unified_initializer, unified_hidden_dim)
+```
+
+and change the `build_fn` partial to pass `shared_initializer=shared_initializer` (it already
+does — just ensure it references the parameter, not the locally-computed tuple).
+
+- [ ] **Step 4: Forward `shared_initializer` through `before_metanca_training` and `train_metanca`**
+
+In `_train_metanca.py`, add `shared_initializer: tuple | None = None` to both
+`before_metanca_training(cfg, *, models, test_model, rand_key, shared_initializer=None)` and
+`train_metanca(...)`. In `before_metanca_training`, pass it to `build_many`:
+
+```python
+    *tasknets, test_tasknet = metanca.TaskNet.build_many(
+        models=models + [test_model],
+        input_shapes=[input_shape] * len(models) + [input_shape],
+        key=tasknet_rand_key,
+        d_neuron=cfg.positional_encoding.d_neuron,
+        d_layer=cfg.positional_encoding.d_layer,
+        d_spatial=cfg.positional_encoding.d_spatial,
+        shared_initializer=shared_initializer,
+    )
+```
+
+In `train_metanca`, forward it in its call to `before_metanca_training(..., shared_initializer=shared_initializer)`.
+
+- [ ] **Step 5: Add the grid-max initializer helper**
+
+```python
+# metanca_training/src/metanca_training/scaling/hidden_state.py
+"""Explicit grid-max hidden-state initializer for the scaling study.
+
+Provisions the positional-encoding tables to the grid-wide maxima (neuron table
+max(input_dim, MAX_HIDDEN_WIDTH); layer table MAX_HIDDEN_LAYERS + 1 for the output layer),
+identically for training and evaluation. See spec "Hidden-state initialization consistency".
+"""
+
+import jax.numpy as jnp
+
+from metanca.hidden_state import hidden_state_initializer
+
+from .arch_grid import MAX_HIDDEN_LAYERS, MAX_HIDDEN_WIDTH
+
+
+def grid_hidden_state_initializer(
+    input_dim: int, d_neuron: int, d_layer: int, d_spatial: int
+):
+    """Return (initializer_fn, hidden_dim) provisioned to the grid-wide maxima."""
+    max_in = max(input_dim, MAX_HIDDEN_WIDTH)   # 784 for flat Fashion-MNIST
+    max_out = MAX_HIDDEN_WIDTH                   # 512 (>= n_classes)
+    n_layers = MAX_HIDDEN_LAYERS + 1             # + output layer => 6
+    return hidden_state_initializer(
+        jnp.array([max_in, max_out]),
+        n_layers,
+        d_neuron=d_neuron, d_layer=d_layer, d_spatial=d_spatial,
+    )
+```
+
+- [ ] **Step 6: Write tests for the plumbing + helper**
+
+```python
+# metanca_training/tests/metanca_training/scaling/test__build_many_shared_initializer.py
+import jax
+
+import metanca
+from metanca_training.scaling.arch_grid import build_mlp
+from metanca_training.scaling.hidden_state import grid_hidden_state_initializer
+
+
+def test_build_many_uses_shared_initializer():
+    shared = grid_hidden_state_initializer(784, d_neuron=10, d_layer=10, d_spatial=10)
+    tns = metanca.TaskNet.build_many(
+        models=[build_mlp((32,), 10), build_mlp((64, 32), 10)],
+        input_shapes=[(784,), (784,)], key=jax.random.key(0),
+        d_neuron=10, d_layer=10, d_spatial=10, shared_initializer=shared,
+    )
+    assert all(tn.hidden_dim == shared[1] for tn in tns)
+    assert all(tn.hidden_state_initializer is not None for tn in tns)
+```
+
+```python
+# metanca_training/tests/metanca_training/scaling/test__grid_initializer.py
+import jax
+import pytest
+
+import metanca
+from metanca_training.scaling.arch_grid import build_mlp
+from metanca_training.scaling.hidden_state import grid_hidden_state_initializer
+
+IN = (784,)
+PE = dict(d_neuron=10, d_layer=10, d_spatial=10)
+
+
+def _build_with(widths, shared):
+    return metanca.TaskNet.build(
+        model=build_mlp(widths, 10), input_shape=IN, key=jax.random.key(1),
+        n_spatial_dims=0, shared_initializer=shared, **PE,
+    )
+
+
+def test_grid_initializer_hidden_dim():
+    _, hidden_dim = grid_hidden_state_initializer(784, **PE)
+    assert hidden_dim == 30  # 2*d_neuron + d_layer (no spatial)
+
+
+def test_grid_initializer_covers_extreme_archs():
+    shared = grid_hidden_state_initializer(784, **PE)
+    for widths in [(512, 512, 512, 512, 512), (32, 32, 32, 32, 32), (512, 32), (32, 32)]:
+        _build_with(widths, shared)  # must not raise (in-bounds for all depths/widths)
+
+
+def test_too_shallow_initializer_raises_on_deep_arch():
+    # asserts enabled (pytest default); a depth-2 initializer has n_layers=3
+    from metanca.hidden_state import hidden_state_initializer
+    import jax.numpy as jnp
+    shallow = hidden_state_initializer(jnp.array([784, 512]), 3, **PE)
+    with pytest.raises(AssertionError):
+        _build_with((512, 512, 512, 512, 512), shallow)
+```
+
+- [ ] **Step 7: Write the train_metanca smoke test**
 
 ```python
 # metanca_training/tests/metanca_training/test__train_metanca_returns.py
@@ -490,19 +645,29 @@ def test_train_metanca_returns_params_and_vars():
     assert hasattr(tvars, "test_tasknet") and hasattr(tvars, "local_rule_net_apply")
 ```
 
-- [ ] **Step 4: Run the test**
+- [ ] **Step 8: Run the tests**
 
-Run: `XLA_PYTHON_CLIENT_PREALLOCATE=false pytest metanca_training/tests/metanca_training/test__train_metanca_returns.py -q`
+Run:
+```bash
+XLA_PYTHON_CLIENT_PREALLOCATE=false pytest \
+  metanca_training/tests/metanca_training/test__train_metanca_returns.py \
+  metanca_training/tests/metanca_training/scaling/test__build_many_shared_initializer.py \
+  metanca_training/tests/metanca_training/scaling/test__grid_initializer.py -q
+```
 Expected: PASS. (If iris input_shape mismatches the tiny MLP, use `dataset=iris` default `input_shape`; iris features = 4, classes = 3.)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add metanca_training/src/metanca_training/_train_metanca.py \
+git add metanca/src/metanca/nn/_tasknet.py \
+        metanca_training/src/metanca_training/_train_metanca.py \
         metanca_training/src/metanca_training/_hydra_configs.py \
         metanca_training/configs/training/default.yaml \
-        metanca_training/tests/metanca_training/test__train_metanca_returns.py
-git commit -m "feat: train_metanca returns final params + vars; toggle early stopping"
+        metanca_training/src/metanca_training/scaling/hidden_state.py \
+        metanca_training/tests/metanca_training/test__train_metanca_returns.py \
+        metanca_training/tests/metanca_training/scaling/test__build_many_shared_initializer.py \
+        metanca_training/tests/metanca_training/scaling/test__grid_initializer.py
+git commit -m "feat: train_metanca returns params/vars; explicit grid-max initializer plumbing"
 ```
 
 ---
@@ -528,7 +693,8 @@ from hydra import compose, initialize_config_dir
 from metanca_training._hydra_configs import register_configs
 from metanca_training._train_metanca import before_metanca_training
 from metanca_training.data_utils import get_fashion_mnist_datasets, prepare_batches
-from metanca_training.scaling.arch_grid import SPANNING_ARCH, build_mlp
+from metanca_training.scaling.arch_grid import build_mlp
+from metanca_training.scaling.hidden_state import grid_hidden_state_initializer
 from metanca_training.scaling.evaluate_pool import evaluate_arch_pool
 
 CONFIG_DIR = str((Path(__file__).parents[4] / "configs").resolve())
@@ -543,10 +709,11 @@ def test_evaluate_arch_pool_rows():
     key = jax.random.key(0)
     X, y, tr, va = get_fashion_mnist_datasets(key)
     _, val_b = prepare_batches(X, y, tr, va, batch_size=512)
-    # spanning test_model so the shared initializer covers the depth-2 eval arch below
+    # explicit grid-max initializer (neuron 784, layer 6) covers the depth-2 eval arch below
+    shared = grid_hidden_state_initializer(784, d_neuron=10, d_layer=10, d_spatial=10)
     tvars = before_metanca_training(
-        cfg, models=[build_mlp((32,), 10)],
-        test_model=build_mlp(SPANNING_ARCH, 10), rand_key=key
+        cfg, models=[build_mlp((32,), 10)], test_model=build_mlp((64, 32), 10),
+        rand_key=key, shared_initializer=shared,
     )
     rows = evaluate_arch_pool(
         training_vars=tvars, local_rule_params=tvars.local_rule_params,
@@ -673,65 +840,15 @@ Note: `cfg.model.use_bias` exists on the composed config (defaults `True`); if a
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `XLA_PYTHON_CLIENT_PREALLOCATE=false pytest metanca_training/tests/metanca_training/scaling/test__evaluate_pool.py -q`
-Expected: PASS.
+Expected: PASS. (The grid-max initializer coverage guard itself lives in Task 4's
+`test__grid_initializer.py`; this task only checks the evaluator's row structure/resume.)
 
-- [ ] **Step 5: Add the shared-initializer coverage regression test**
-
-This guards the train/eval hidden-state consistency invariant: an initializer built from the
-spanning arch initializes every extreme arch in-bounds, while a too-shallow initializer
-crashes on a deep arch (documenting why the driver must use `SPANNING_ARCH`).
-
-```python
-# metanca_training/tests/metanca_training/scaling/test__initializer_coverage.py
-import jax
-import pytest
-
-import metanca
-from metanca_training.scaling.arch_grid import SPANNING_ARCH, build_mlp
-
-IN = (784,)
-PE = dict(d_neuron=10, d_layer=10, d_spatial=10)
-
-
-def _initializer_from(widths):
-    tn = metanca.TaskNet.build_many(
-        models=[build_mlp(widths, 10)], input_shapes=[IN], key=jax.random.key(0), **PE
-    )[0]
-    return tn.hidden_state_initializer, tn.hidden_dim
-
-
-def _build_with(widths, shared):
-    return metanca.TaskNet.build(
-        model=build_mlp(widths, 10), input_shape=IN, key=jax.random.key(1),
-        n_spatial_dims=0, shared_initializer=shared, **PE,
-    )
-
-
-def test_spanning_initializer_covers_extreme_archs():
-    shared = _initializer_from(SPANNING_ARCH)
-    for widths in [(512, 512, 512, 512, 512), (32, 32, 32, 32, 32), (512, 32), (32, 32)]:
-        _build_with(widths, shared)  # must not raise (in-bounds for all depths/widths)
-
-
-def test_too_shallow_initializer_raises_on_deep_arch():
-    # asserts must be enabled (pytest default); a depth-2 initializer has n_layers=3
-    shallow = _initializer_from((32, 32))
-    with pytest.raises(AssertionError):
-        _build_with((512, 512, 512, 512, 512), shallow)
-```
-
-- [ ] **Step 6: Run the coverage test**
-
-Run: `XLA_PYTHON_CLIENT_PREALLOCATE=false pytest metanca_training/tests/metanca_training/scaling/test__initializer_coverage.py -q`
-Expected: PASS (spanning initializer covers all; shallow initializer raises on depth-5 arch).
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add metanca_training/src/metanca_training/scaling/evaluate_pool.py \
-        metanca_training/tests/metanca_training/scaling/test__evaluate_pool.py \
-        metanca_training/tests/metanca_training/scaling/test__initializer_coverage.py
-git commit -m "feat: per-arch evaluator + shared-initializer coverage guard"
+        metanca_training/tests/metanca_training/scaling/test__evaluate_pool.py
+git commit -m "feat: per-architecture pool evaluator for scaling ablation"
 ```
 
 ---
@@ -743,7 +860,7 @@ git commit -m "feat: per-arch evaluator + shared-initializer coverage guard"
 - Create: `metanca_training/scripts/scaling/run_scaling.py`
 
 **Interfaces:**
-- Consumes: `arch_grid.{build_grid,split_grid,sample_subset,build_mlp,N_VAL}`, `train_metanca`, `evaluate_arch_pool`, `load_dataset` (from `train.py`).
+- Consumes: `arch_grid.{build_grid,split_grid,sample_subset,build_mlp,N_VAL}`, `hidden_state.grid_hidden_state_initializer`, `train_metanca` (with `shared_initializer`), `evaluate_arch_pool`, `load_dataset` (from `train.py`).
 - Produces: a **per-run** JSONL file `results/scaling/<ablation>/T{T}_rep{rep}.jsonl`, one line flushed per arch, plus a `.done` marker on completion. Resumable: skips the run if `.done` exists; skips archs already in the file; training resumes from the per-run checkpoint. CLI:
   `python run_scaling.py --ablation fixed5 --T 5 --rep 0 --metaepochs 12000 --results-dir results/scaling [--smoke]`.
 - Row schema (superset of Task 5 rows): `+ ablation, T, rep, seed`.
@@ -771,8 +888,9 @@ from train import load_dataset  # noqa: E402
 from metanca_training import train_metanca  # noqa: E402
 from metanca_training._hydra_configs import register_configs  # noqa: E402
 from metanca_training.scaling.arch_grid import (  # noqa: E402
-    N_VAL, SPANNING_ARCH, build_grid, build_mlp, sample_subset, split_grid,
+    N_VAL, build_grid, build_mlp, sample_subset, split_grid,
 )
+from metanca_training.scaling.hidden_state import grid_hidden_state_initializer  # noqa: E402
 from metanca_training.scaling.evaluate_pool import evaluate_arch_pool  # noqa: E402
 
 CONFIG_DIR = str((Path(__file__).parents[2] / "configs").resolve())
@@ -852,15 +970,20 @@ def main() -> None:
 
     n_classes = int(cfg.dataset.output_shape)
     models = [build_mlp(w, n_classes) for w in train_archs]
-    # SPANNING_ARCH (grid max depth x width) makes before_metanca_training's unified
-    # hidden-state initializer span every train + val arch, independent of the sampled
-    # T-subset. Reused at eval via training_vars.test_tasknet.hidden_state_initializer.
-    # It is used only for the initializer + in-loop logging; it is NOT trained on.
-    test_model = build_mlp(SPANNING_ARCH, n_classes)
+    test_model = build_mlp(val_archs[0], n_classes)  # for in-loop monitor/logging only
 
+    # Explicit grid-max hidden-state initializer, shared by training and eval, so every
+    # train + val arch is provisioned/encoded identically regardless of the sampled T-subset.
+    shared_init = grid_hidden_state_initializer(
+        input_dim=int(cfg.dataset.input_shape[0]),
+        d_neuron=cfg.positional_encoding.d_neuron,
+        d_layer=cfg.positional_encoding.d_layer,
+        d_spatial=cfg.positional_encoding.d_spatial,
+    )
     # Resumes from the per-run checkpoint (local_rule_checkpoints/<run_name>) if present.
     params, tvars = train_metanca(
-        train_batches, val_batches, cfg=cfg, models=models, test_model=test_model
+        train_batches, val_batches, cfg=cfg, models=models, test_model=test_model,
+        shared_initializer=shared_init,
     )
 
     skip_ids = _existing_arch_ids(out)   # resume: don't re-evaluate finished archs
@@ -949,8 +1072,9 @@ from run_scaling import build_cfg  # noqa: E402 (same directory)
 
 from metanca_training import train_metanca  # noqa: E402
 from metanca_training.scaling.arch_grid import (  # noqa: E402
-    N_VAL, SPANNING_ARCH, build_grid, build_mlp, sample_subset, split_grid,
+    N_VAL, build_grid, build_mlp, sample_subset, split_grid,
 )
+from metanca_training.scaling.hidden_state import grid_hidden_state_initializer  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -965,7 +1089,8 @@ def main() -> None:
     grid = build_grid("fixed5")
     pool, _ = split_grid(grid, N_VAL["fixed5"], seed=1)
     train_archs = sample_subset(pool, args.T - 1, seed=1)
-    train_archs = [SPANNING_ARCH, *train_archs]  # force the largest arch into the pool
+    largest = (512, 512, 512, 512, 512)  # grid max depth x width -> worst-case memory
+    train_archs = [largest, *train_archs]  # force the largest arch into the pool
 
     cfg = build_cfg("fixed5", "mem_probe", args.metaepochs, seed=0)
     wandb.init(mode="disabled")
@@ -973,9 +1098,15 @@ def main() -> None:
     train_b, val_b = load_dataset(cfg, key)
     models = [build_mlp(w, 10) for w in train_archs]
 
+    shared_init = grid_hidden_state_initializer(
+        input_dim=int(cfg.dataset.input_shape[0]),
+        d_neuron=cfg.positional_encoding.d_neuron,
+        d_layer=cfg.positional_encoding.d_layer,
+        d_spatial=cfg.positional_encoding.d_spatial,
+    )
     t0 = time.time()
     train_metanca(train_b, val_b, cfg=cfg, models=models,
-                  test_model=build_mlp(SPANNING_ARCH, 10))  # spanning initializer, like real runs
+                  test_model=build_mlp((64, 32), 10), shared_initializer=shared_init)
     dt = time.time() - t0
 
     per_epoch = dt / args.metaepochs
