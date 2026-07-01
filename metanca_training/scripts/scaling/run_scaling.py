@@ -55,7 +55,10 @@ def _existing_arch_ids(path: Path) -> set[str]:
     ids = set()
     for line in path.read_text().splitlines():
         if line.strip():
-            ids.add(json.loads(line)["arch_id"])
+            try:
+                ids.add(json.loads(line)["arch_id"])
+            except (json.JSONDecodeError, KeyError):
+                continue  # tolerate a truncated/partial last line from a mid-write crash
     return ids
 
 
@@ -128,16 +131,18 @@ def main() -> None:
                                "rep": args.rep, "seed": seed}) + "\n")
         fout.flush()
 
+    key, eval_key = jax.random.split(key)
     try:
         rows = evaluate_arch_pool(
             training_vars=tvars, local_rule_params=params, archs=archs,
             val_batches=val_batches, cfg=cfg, n_update_steps=10,
-            n_init_samples=(1 if args.smoke else 5), rand_key=key,
+            n_init_samples=(1 if args.smoke else 5), rand_key=eval_key,
             skip_ids=skip_ids, on_row=write_row,
         )
     finally:
         fout.close()
 
+    wandb.finish()
     done_marker.write_text("")   # mark run complete only after all archs are written
     logger.info("wrote %d new rows to %s (run complete)", len(rows), out)
 
