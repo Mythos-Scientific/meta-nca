@@ -43,6 +43,7 @@ from omegaconf import DictConfig, OmegaConf
 from metanca_training import train_metanca
 from metanca_training._hydra_configs import register_configs
 from metanca_training.data_utils import (
+    get_fashion_mnist_datasets,
     get_iris_datasets,
     get_mnist_datasets,
     load_cifar100_arrays,
@@ -91,6 +92,12 @@ def load_dataset(cfg: DictConfig, rand_key: jax.Array):
         )
     elif dataset_name == "mnist":
         X, y, train_inds, val_inds = get_mnist_datasets(rand_key, reshape=True)
+        X = X.reshape(-1, *input_shape)
+        train_batches, val_batches = prepare_batches(
+            X, y, train_inds, val_inds, batch_size=batch_size
+        )
+    elif dataset_name == "fashion_mnist":
+        X, y, train_inds, val_inds = get_fashion_mnist_datasets(rand_key)
         X = X.reshape(-1, *input_shape)
         train_batches, val_batches = prepare_batches(
             X, y, train_inds, val_inds, batch_size=batch_size

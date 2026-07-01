@@ -1,0 +1,4 @@
+name: fashion_mnist
+input_shape: [784]
+output_shape: 10
+batch_size: 512

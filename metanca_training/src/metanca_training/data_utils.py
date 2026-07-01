@@ -255,6 +255,34 @@ def get_mnist_datasets(
     return X, y, train_inds, val_inds
 
 
+def _prepare_fashion_mnist_arrays(images, labels, rand_key):
+    """Flatten to (N,784), standard-scale, one-hot labels, 80/20 split."""
+    X = np.asarray(images, dtype=np.float32).reshape(images.shape[0], -1)
+    X = StandardScaler().fit_transform(X).astype(np.float32)
+    num_classes = 10
+    y = np.array(nn.one_hot(np.asarray(labels, dtype=np.int32), num_classes), dtype=np.float32)
+
+    dataset_size = X.shape[0]
+    shuffled = random.permutation(rand_key, np.arange(dataset_size))
+    train_size = int(0.8 * dataset_size)
+    train_inds = shuffled[:train_size]
+    val_inds = shuffled[train_size:]
+    return X, y, train_inds, val_inds
+
+
+def get_fashion_mnist_datasets(rand_key: jax.random.PRNGKey):
+    """Load Fashion-MNIST via sklearn OpenML and return standardized flat arrays.
+
+    NOTE: TensorFlow is not installable on this aarch64 host and `tfds.load` requires it,
+    so Fashion-MNIST is loaded from OpenML (mirroring `get_mnist_datasets`'s use of
+    `fetch_openml("mnist_784")`). Returns 70000 flat 784-dim samples, 10 classes.
+    """
+    X, y = datasets.fetch_openml("Fashion-MNIST", version=1, return_X_y=True, as_frame=False)
+    images = np.asarray(X, dtype=np.float32)   # (70000, 784), pixel range 0..255
+    labels = np.asarray(y, dtype=np.int32)
+    return _prepare_fashion_mnist_arrays(images, labels, rand_key)
+
+
 def make_train_val_batches(rng_key: jax.random.PRNGKey, imgs_b, labs_b, mask_b, split: float = 0.8):
     n_batches = imgs_b.shape[0]
     idx = jax.random.permutation(rng_key, n_batches)
