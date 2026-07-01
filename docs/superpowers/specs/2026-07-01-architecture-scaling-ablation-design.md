@@ -97,9 +97,33 @@ Decoupled from the training loop (mirrors `eval_arch_generalization` in `train.p
   - Roll out the local rule for **10** update steps (the saturated value).
   - Compute **val loss** and **val accuracy** on the data validation set, averaged over
     **5 random inits** per arch (record mean and std).
-- Write one row per arch to `results/scaling_<ablation>.jsonl` with fields:
+- Write one row per arch, **flushed incrementally as each arch is evaluated**, to a
+  **per-run file** `results/scaling/<ablation>/T{T}_rep{rep}.jsonl`, with fields:
   `ablation, T, rep, seed, arch_id, depth, split ∈ {train, val}, val_loss_mean,
   val_loss_std, val_acc_mean, val_acc_std`.
+
+## Durability and resume
+
+The study is designed so that a crash never loses more than the in-flight architecture,
+and recovery is a matter of re-running the same command:
+
+- **Per-run files, incremental writes.** Each `(ablation, T, rep)` run writes only its own
+  file `results/scaling/<ablation>/T{T}_rep{rep}.jsonl`; one JSON line is appended and
+  flushed as soon as each architecture finishes evaluating. No shared append file (avoids
+  cross-subprocess corruption). A sibling marker `results/scaling/<ablation>/T{T}_rep{rep}.done`
+  is written only after the run's evaluation completes.
+- **Run-level resume.** The sweep orchestrator and the driver both skip any run whose
+  `.done` marker exists.
+- **Eval-level resume.** On restart the driver reads the arch_ids already present in the
+  run file and skips them, so a crash partway through evaluating ~125 archs resumes at the
+  next unevaluated arch.
+- **Training-level resume.** `train_metanca` Orbax-checkpoints the local rule every
+  metaepoch into a stable per-run checkpoint dir
+  (`local_rule_checkpoints/scaling_<ablation>_T{T}_rep{rep}`);
+  `before_metanca_training` restores the latest preserved step on restart and continues to
+  12k. A run that already reached 12k simply finishes the remaining evaluation.
+- **Recovery procedure:** re-run the sweep. Completed runs are skipped, the interrupted run
+  resumes training from its checkpoint, and already-evaluated archs are skipped.
 
 ## Adam baselines
 
@@ -122,8 +146,8 @@ Generated **per metric on separate figures** — validation **loss** and validat
    (and median) val-arch val-metric, one point per T.
 3. Optional Adam reference band (median + IQR across archs) overlaid on the above.
 
-Plots read from `results/scaling_<ablation>.jsonl` and (optionally)
-`results/adam_baselines_fashion_mnist.json`.
+Plots aggregate by globbing all per-run files under `results/scaling/<ablation>/` and
+(optionally) read `results/adam_baselines_fashion_mnist.json`.
 
 ## Code layout
 
@@ -141,10 +165,15 @@ Pure/testable logic under `src/`, executable entry points under `scripts/scaling
 - `scripts/scaling/memory_probe.py` — run a single metaepoch at T=100 with the pool that
   includes the largest arch; log peak memory + per-metaepoch time; project total runtime.
 - `scripts/scaling/run_adam_baselines.py` — Adam over all 246 archs → JSON table.
-- `scripts/scaling/run_scaling.py` — driver: for each (ablation, T, rep) build the train
-  arch list, run meta-training (12k), then run `evaluate_pool` on train+val archs;
-  append to `results/scaling_<ablation>.jsonl`.
-- `scripts/scaling/plot_scaling.py` — produce the boxplot + scatter figures per metric.
+- `scripts/scaling/run_scaling.py` — driver: for one (ablation, T, rep) build the train
+  arch list, resume-or-run meta-training (12k), then run `evaluate_pool` on train+val
+  archs, writing per-arch rows incrementally to
+  `results/scaling/<ablation>/T{T}_rep{rep}.jsonl` and a `.done` marker on completion
+  (skips the run if already done; skips already-evaluated archs).
+- `scripts/scaling/run_sweep.py` — orchestrator: launches one `run_scaling.py` subprocess
+  per (ablation, T, rep), skipping runs whose `.done` marker exists.
+- `scripts/scaling/plot_scaling.py` — glob per-run files under `results/scaling/<ablation>/`
+  and produce the boxplot + scatter figures per metric.
 
 ## Environment (uv)
 
@@ -179,8 +208,8 @@ the GPU allocator does not starve host RAM.
 2. Fashion-MNIST loader + `dataset/fashion_mnist.yaml` wired in.
 3. **Memory + timing probe** at T=100 (project total wall-clock; do not trim reps).
 4. Adam baselines over all 246 archs → JSON table.
-5. Fixed-depth ablation (15 runs + per-arch eval) → `results/scaling_fixed5.jsonl`.
-6. Varying-depth ablation (15 runs + per-arch eval) → `results/scaling_varying.jsonl`.
+5. Fixed-depth ablation (15 runs + per-arch eval) → `results/scaling/fixed5/T*_rep*.jsonl`.
+6. Varying-depth ablation (15 runs + per-arch eval) → `results/scaling/varying/T*_rep*.jsonl`.
 7. Plots (loss and accuracy figure sets) for both ablations.
 
 ## Out of scope (YAGNI)

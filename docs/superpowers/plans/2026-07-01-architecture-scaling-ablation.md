@@ -499,7 +499,7 @@ git commit -m "feat: train_metanca returns final params + vars; toggle early sto
 
 **Interfaces:**
 - Consumes: `TrainingVars` (from Task 4), `arch_grid.build_mlp/arch_id`, `metanca.TaskNet.build`, `metanca_validation_step`, `CallbackRunner`/`create_accuracy_callback`.
-- Produces (used by Task 7): `evaluate_arch_pool(*, training_vars, local_rule_params, archs, val_batches, cfg, n_update_steps=10, n_init_samples=5, rand_key) -> list[dict]` where `archs` is a list of `(widths: tuple[int,...], split: str)` and each output dict has keys `arch_id, depth, split, val_loss_mean, val_loss_std, val_acc_mean, val_acc_std`.
+- Produces (used by Task 6): `evaluate_arch_pool(*, training_vars, local_rule_params, archs, val_batches, cfg, n_update_steps=10, n_init_samples=5, rand_key, skip_ids=None, on_row=None) -> list[dict]` where `archs` is a list of `(widths: tuple[int,...], split: str)` and each output dict has keys `arch_id, depth, split, val_loss_mean, val_loss_std, val_acc_mean, val_acc_std`. Archs whose `arch_id` is in `skip_ids` are skipped (already-evaluated on resume); `on_row(row)` is called immediately after each arch is evaluated (for incremental durable writes).
 
 - [ ] **Step 1: Write the failing test** (uses untrained random rule — only checks structure/finiteness)
 
@@ -541,6 +541,17 @@ def test_evaluate_arch_pool_rows():
     for r in rows:
         assert keys <= set(r)
         assert r["val_loss_mean"] == r["val_loss_mean"]  # not NaN
+
+    # resume + incremental-write behavior
+    seen: list[dict] = []
+    rows2 = evaluate_arch_pool(
+        training_vars=tvars, local_rule_params=tvars.local_rule_params,
+        archs=[((32,), "train"), ((64, 32), "val")],
+        val_batches=val_b, cfg=cfg, n_update_steps=1, n_init_samples=1, rand_key=key,
+        skip_ids={"d1_32"}, on_row=seen.append,
+    )
+    assert [r["arch_id"] for r in rows2] == ["d2_64-32"]   # skipped d1_32
+    assert seen == rows2                                    # on_row fired per surviving arch
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -554,7 +565,7 @@ Expected: FAIL (`evaluate_pool` module not found).
 # metanca_training/src/metanca_training/scaling/evaluate_pool.py
 """Evaluate a trained local rule on a pool of architectures (per-arch val metrics)."""
 
-from typing import Sequence
+from typing import Callable, Optional, Sequence
 
 import jax
 import numpy as np
@@ -576,6 +587,8 @@ def evaluate_arch_pool(
     n_update_steps: int = 10,
     n_init_samples: int = 5,
     rand_key,
+    skip_ids: Optional[set[str]] = None,
+    on_row: Optional[Callable[[dict], None]] = None,
 ) -> list[dict]:
     input_shape = tuple(cfg.dataset.input_shape)
     n_spatial_dims = len(input_shape) - 1
@@ -586,9 +599,12 @@ def evaluate_arch_pool(
         training_vars.test_tasknet.hidden_state_initializer,
         training_vars.test_tasknet.hidden_dim,
     )
+    skip_ids = skip_ids or set()
 
     rows: list[dict] = []
     for widths, split in archs:
+        if arch_id(widths) in skip_ids:
+            continue
         rand_key, build_key = jax.random.split(rand_key)
         tasknet = metanca.TaskNet.build(
             model=build_mlp(widths, n_classes, use_bias=cfg.model.use_bias),
@@ -619,7 +635,7 @@ def evaluate_arch_pool(
             )
             losses.append(float(metrics.get("loss", float("nan"))))
             accs.append(float(metrics.get("accuracy", float("nan"))))
-        rows.append({
+        row = {
             "arch_id": arch_id(widths),
             "depth": len(widths),
             "split": split,
@@ -627,7 +643,10 @@ def evaluate_arch_pool(
             "val_loss_std": float(np.std(losses)),
             "val_acc_mean": float(np.mean(accs)),
             "val_acc_std": float(np.std(accs)),
-        })
+        }
+        if on_row is not None:
+            on_row(row)          # durable incremental write before continuing
+        rows.append(row)
     return rows
 ```
 
@@ -656,8 +675,8 @@ git commit -m "feat: per-architecture pool evaluator for scaling ablation"
 
 **Interfaces:**
 - Consumes: `arch_grid.{build_grid,split_grid,sample_subset,build_mlp,N_VAL}`, `train_metanca`, `evaluate_arch_pool`, `load_dataset` (from `train.py`).
-- Produces: one JSONL file appended with per-arch rows for a single `(ablation, T, rep)` run. CLI:
-  `python run_scaling.py --ablation fixed5 --T 5 --rep 0 --metaepochs 12000 --out results/scaling_fixed5.jsonl [--smoke]`.
+- Produces: a **per-run** JSONL file `results/scaling/<ablation>/T{T}_rep{rep}.jsonl`, one line flushed per arch, plus a `.done` marker on completion. Resumable: skips the run if `.done` exists; skips archs already in the file; training resumes from the per-run checkpoint. CLI:
+  `python run_scaling.py --ablation fixed5 --T 5 --rep 0 --metaepochs 12000 --results-dir results/scaling [--smoke]`.
 - Row schema (superset of Task 5 rows): `+ ablation, T, rep, seed`.
 
 - [ ] **Step 1: Implement the driver**
@@ -713,6 +732,16 @@ def build_cfg(ablation: str, run_name: str, metaepochs: int, seed: int):
         )
 
 
+def _existing_arch_ids(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    ids = set()
+    for line in path.read_text().splitlines():
+        if line.strip():
+            ids.add(json.loads(line)["arch_id"])
+    return ids
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, force=True)
     p = argparse.ArgumentParser()
@@ -720,7 +749,7 @@ def main() -> None:
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--rep", type=int, required=True)
     p.add_argument("--metaepochs", type=int, default=12000)
-    p.add_argument("--out", type=str, required=True)
+    p.add_argument("--results-dir", type=str, default="results/scaling")
     p.add_argument("--smoke", action="store_true")
     args = p.parse_args()
 
@@ -729,6 +758,14 @@ def main() -> None:
 
     seed = 1000 * args.T + args.rep
     run_name = f"scaling_{args.ablation}_T{args.T}_rep{args.rep}"
+
+    run_dir = Path(args.results_dir) / args.ablation
+    run_dir.mkdir(parents=True, exist_ok=True)
+    out = run_dir / f"T{args.T}_rep{args.rep}.jsonl"
+    done_marker = run_dir / f"T{args.T}_rep{args.rep}.done"
+    if done_marker.exists():
+        logger.info("run already complete (%s); nothing to do", done_marker)
+        return
 
     grid = build_grid(args.ablation)
     pool, val_archs = split_grid(grid, N_VAL[args.ablation], seed=SPLIT_SEED)
@@ -748,24 +785,35 @@ def main() -> None:
     models = [build_mlp(w, n_classes) for w in train_archs]
     test_model = build_mlp(val_archs[0], n_classes)  # placeholder for in-loop monitor
 
+    # Resumes from the per-run checkpoint (local_rule_checkpoints/<run_name>) if present.
     params, tvars = train_metanca(
         train_batches, val_batches, cfg=cfg, models=models, test_model=test_model
     )
 
-    archs = [(w, "train") for w in train_archs] + [(w, "val") for w in val_archs]
-    rows = evaluate_arch_pool(
-        training_vars=tvars, local_rule_params=params, archs=archs,
-        val_batches=val_batches, cfg=cfg, n_update_steps=10,
-        n_init_samples=(1 if args.smoke else 5), rand_key=key,
-    )
+    skip_ids = _existing_arch_ids(out)   # resume: don't re-evaluate finished archs
+    if skip_ids:
+        logger.info("resuming eval; %d archs already recorded", len(skip_ids))
 
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("a") as f:
-        for r in rows:
-            f.write(json.dumps({**r, "ablation": args.ablation, "T": args.T,
-                                "rep": args.rep, "seed": seed}) + "\n")
-    logger.info("wrote %d rows to %s", len(rows), out)
+    archs = [(w, "train") for w in train_archs] + [(w, "val") for w in val_archs]
+    fout = out.open("a")  # append; one flushed line per arch (durable)
+
+    def write_row(r: dict) -> None:
+        fout.write(json.dumps({**r, "ablation": args.ablation, "T": args.T,
+                               "rep": args.rep, "seed": seed}) + "\n")
+        fout.flush()
+
+    try:
+        rows = evaluate_arch_pool(
+            training_vars=tvars, local_rule_params=params, archs=archs,
+            val_batches=val_batches, cfg=cfg, n_update_steps=10,
+            n_init_samples=(1 if args.smoke else 5), rand_key=key,
+            skip_ids=skip_ids, on_row=write_row,
+        )
+    finally:
+        fout.close()
+
+    done_marker.write_text("")   # mark run complete only after all archs are written
+    logger.info("wrote %d new rows to %s (run complete)", len(rows), out)
 
 
 if __name__ == "__main__":
@@ -777,21 +825,23 @@ if __name__ == "__main__":
 Run:
 ```bash
 XLA_PYTHON_CLIENT_PREALLOCATE=false python metanca_training/scripts/scaling/run_scaling.py \
-  --ablation fixed5 --T 2 --rep 0 --out results/_smoke.jsonl --smoke
+  --ablation fixed5 --T 2 --rep 0 --results-dir results/_smoke --smoke
 ```
-Expected: exits 0; `results/_smoke.jsonl` contains `2 (train) + 25 (val) = 27` JSON lines, each with `val_loss_mean`, `val_acc_mean`, `ablation`, `T`, `rep`, `seed`.
+Expected: exits 0; `results/_smoke/fixed5/T2_rep0.jsonl` contains `2 (train) + 25 (val) = 27` JSON lines, and `results/_smoke/fixed5/T2_rep0.done` exists.
 
-- [ ] **Step 3: Verify the smoke output**
+- [ ] **Step 3: Verify the smoke output + resume/skip**
 
-Run: `python -c "import json; rows=[json.loads(l) for l in open('results/_smoke.jsonl')]; print(len(rows), sum(r['split']=='val' for r in rows))"`
+Run: `python -c "import json; rows=[json.loads(l) for l in open('results/_smoke/fixed5/T2_rep0.jsonl')]; print(len(rows), sum(r['split']=='val' for r in rows))"`
 Expected: prints `27 25`.
+
+Re-run the exact same command from Step 2. Expected: it logs "run already complete" and exits immediately without retraining (the `.done` marker short-circuits).
 
 - [ ] **Step 4: Clean up smoke artifact and commit**
 
 ```bash
-rm -f results/_smoke.jsonl
+rm -rf results/_smoke local_rule_checkpoints/scaling_fixed5_T2_rep0
 git add metanca_training/scripts/scaling/__init__.py metanca_training/scripts/scaling/run_scaling.py
-git commit -m "feat: single-run driver for architecture-scaling ablation"
+git commit -m "feat: single-run driver with per-run durable output + resume"
 ```
 
 ---
@@ -887,8 +937,8 @@ git commit -m "feat: memory/timing probe for T=100 scaling runs"
 - Create: `metanca_training/scripts/scaling/run_sweep.py`
 
 **Interfaces:**
-- Produces: launches `run_scaling.py` as a **subprocess per (ablation, T, rep)** (memory isolation), sequentially. CLI:
-  `python run_sweep.py --ablation fixed5 [--dry-run]` → 5 T × 3 reps = 15 subprocesses; `--out results/scaling_fixed5.jsonl`.
+- Produces: launches `run_scaling.py` as a **subprocess per (ablation, T, rep)** (memory isolation), sequentially, skipping runs whose `.done` marker already exists. CLI:
+  `python run_sweep.py --ablation fixed5 [--dry-run]` → up to 5 T × 3 reps = 15 subprocesses under `--results-dir results/scaling`.
 
 - [ ] **Step 1: Implement the orchestrator**
 
@@ -911,17 +961,20 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--ablation", choices=["fixed5", "varying"], required=True)
     p.add_argument("--metaepochs", type=int, default=12000)
-    p.add_argument("--out", type=str, default=None)
+    p.add_argument("--results-dir", type=str, default="results/scaling")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
 
-    out = args.out or f"results/scaling_{args.ablation}.jsonl"
     env = {**os.environ, "XLA_PYTHON_CLIENT_PREALLOCATE": "false"}
     for t in TS:
         for rep in REPS:
+            done = Path(args.results_dir) / args.ablation / f"T{t}_rep{rep}.done"
+            if done.exists():
+                print(f"skip (done): {done}", flush=True)
+                continue
             cmd = [sys.executable, str(HERE / "run_scaling.py"),
                    "--ablation", args.ablation, "--T", str(t), "--rep", str(rep),
-                   "--metaepochs", str(args.metaepochs), "--out", out]
+                   "--metaepochs", str(args.metaepochs), "--results-dir", args.results_dir]
             print(" ".join(cmd), flush=True)
             if not args.dry_run:
                 subprocess.run(cmd, check=True, env=env)
@@ -1060,7 +1113,8 @@ git commit -m "feat: Adam baseline table over the full architecture grid"
 
 **Interfaces:**
 - Produces:
-  - `load_results(path: str) -> list[dict]` — parse a scaling JSONL.
+  - `load_results(path: str) -> list[dict]` — parse a single scaling JSONL.
+  - `load_results_dir(dirpath: str) -> list[dict]` — glob and concatenate all `*.jsonl` under a per-ablation results dir.
   - `aggregate(rows: list[dict], metric: str) -> dict[int, dict[str, list[float]]]` — `metric` ∈ `{"loss","acc"}`; returns `{T: {"train": [...], "val": [...]}}` pooling all reps' per-arch means.
   - `plot_boxplots(agg, metric, out_path)` and `plot_scatter(agg, metric, out_path, adam=None)` — write PNGs (two-panel shared-Y boxplot; central-tendency scatter). CLI writes both metrics' figures for one ablation.
 
@@ -1131,6 +1185,14 @@ def load_results(path) -> list[dict]:
     return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
 
 
+def load_results_dir(dirpath) -> list[dict]:
+    """Concatenate all per-run *.jsonl files under a results dir (e.g. results/scaling/fixed5)."""
+    rows: list[dict] = []
+    for f in sorted(Path(dirpath).glob("*.jsonl")):
+        rows.extend(load_results(f))
+    return rows
+
+
 def aggregate(rows: list[dict], metric: str) -> dict[int, dict[str, list[float]]]:
     key = _MEAN_KEY[metric]
     agg: dict[int, dict[str, list[float]]] = {}
@@ -1184,19 +1246,20 @@ import json
 from pathlib import Path
 
 from metanca_training.scaling.plotting import (
-    aggregate, load_results, plot_boxplots, plot_scatter,
+    aggregate, load_results_dir, plot_boxplots, plot_scatter,
 )
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--results", required=True)
+    p.add_argument("--results-dir", required=True,
+                   help="per-ablation dir, e.g. results/scaling/fixed5")
     p.add_argument("--adam", default=None)
     p.add_argument("--outdir", default="results/figures")
     p.add_argument("--tag", default="fixed5")
     args = p.parse_args()
 
-    rows = load_results(args.results)
+    rows = load_results_dir(args.results_dir)
     adam = json.loads(Path(args.adam).read_text()) if args.adam else None
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -1246,16 +1309,16 @@ Record the exact commands (probe → Adam baselines → both sweeps → plots), 
 python metanca_training/scripts/scaling/memory_probe.py --T 100 --metaepochs 12
 # 4. Adam baselines
 python metanca_training/scripts/scaling/run_adam_baselines.py --epochs 50
-# 5. fixed-depth sweep
+# 5. fixed-depth sweep (resumable: re-run to continue after any crash)
 python metanca_training/scripts/scaling/run_sweep.py --ablation fixed5
 # 6. varying-depth sweep
 python metanca_training/scripts/scaling/run_sweep.py --ablation varying
-# 7. plots
+# 7. plots (glob per-run files)
 python metanca_training/scripts/scaling/plot_scaling.py \
-  --results results/scaling_fixed5.jsonl \
+  --results-dir results/scaling/fixed5 \
   --adam results/adam_baselines_fashion_mnist.json --tag fixed5
 python metanca_training/scripts/scaling/plot_scaling.py \
-  --results results/scaling_varying.jsonl \
+  --results-dir results/scaling/varying \
   --adam results/adam_baselines_fashion_mnist.json --tag varying
 ```
 
