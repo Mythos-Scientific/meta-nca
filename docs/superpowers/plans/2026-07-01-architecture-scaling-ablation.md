@@ -88,15 +88,24 @@ git commit -m "chore: set up uv env for scaling study; document GB10 JAX setup"
   - `split_grid(grid: Sequence[tuple[int, ...]], n_val: int, seed: int) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]]]` → `(pool, val)`.
   - `sample_subset(pool: Sequence[tuple[int, ...]], t: int, seed: int) -> list[tuple[int, ...]]`.
   - `N_VAL: dict[str, int] = {"fixed5": 25, "varying": 49}`.
+  - `SPANNING_ARCH: tuple[int, ...] = (512, 512, 512, 512, 512)` — grid's global max depth × max width; used to build the shared hidden-state initializer so it spans every train + val arch (see spec "Hidden-state initialization consistency").
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 # metanca_training/tests/metanca_training/scaling/test__arch_grid.py
 from metanca_training.scaling.arch_grid import (
-    WIDTHS, N_VAL, enumerate_arch_widths, arch_id, arch_layer_specs,
+    WIDTHS, N_VAL, SPANNING_ARCH, enumerate_arch_widths, arch_id, arch_layer_specs,
     build_mlp, build_grid, split_grid, sample_subset,
 )
+
+
+def test_spanning_arch_covers_both_grids():
+    for kind in ("fixed5", "varying"):
+        for w in build_grid(kind):
+            assert len(w) <= len(SPANNING_ARCH)        # depth covered
+            assert max(w) <= max(SPANNING_ARCH)        # width covered
+    assert len(SPANNING_ARCH) == 5 and max(SPANNING_ARCH) == max(WIDTHS)
 
 
 def test_enumerate_counts_per_depth():
@@ -186,6 +195,13 @@ WIDTHS: tuple[int, ...] = (32, 64, 128, 256, 512)
 N_VAL: dict[str, int] = {"fixed5": 25, "varying": 49}
 
 _GRID_DEPTHS: dict[str, list[int]] = {"fixed5": [5], "varying": [2, 3, 4, 5]}
+
+# Grid's global max depth x max width. The shared hidden-state initializer MUST be built
+# to span this (see spec "Hidden-state initialization consistency"): build_many's unified
+# initializer asserts layer_idx < max_n_layers, so a too-shallow initializer crashes when
+# evaluating a deeper val arch. Passed as the placeholder test_model so the initializer
+# always spans the whole grid regardless of which T-subset is sampled.
+SPANNING_ARCH: tuple[int, ...] = tuple([max(WIDTHS)] * max(_GRID_DEPTHS["varying"]))
 
 
 def enumerate_arch_widths(
@@ -512,7 +528,7 @@ from hydra import compose, initialize_config_dir
 from metanca_training._hydra_configs import register_configs
 from metanca_training._train_metanca import before_metanca_training
 from metanca_training.data_utils import get_fashion_mnist_datasets, prepare_batches
-from metanca_training.scaling.arch_grid import build_mlp
+from metanca_training.scaling.arch_grid import SPANNING_ARCH, build_mlp
 from metanca_training.scaling.evaluate_pool import evaluate_arch_pool
 
 CONFIG_DIR = str((Path(__file__).parents[4] / "configs").resolve())
@@ -527,8 +543,10 @@ def test_evaluate_arch_pool_rows():
     key = jax.random.key(0)
     X, y, tr, va = get_fashion_mnist_datasets(key)
     _, val_b = prepare_batches(X, y, tr, va, batch_size=512)
+    # spanning test_model so the shared initializer covers the depth-2 eval arch below
     tvars = before_metanca_training(
-        cfg, models=[build_mlp((32,), 10)], test_model=build_mlp((32,), 10), rand_key=key
+        cfg, models=[build_mlp((32,), 10)],
+        test_model=build_mlp(SPANNING_ARCH, 10), rand_key=key
     )
     rows = evaluate_arch_pool(
         training_vars=tvars, local_rule_params=tvars.local_rule_params,
@@ -657,12 +675,63 @@ Note: `cfg.model.use_bias` exists on the composed config (defaults `True`); if a
 Run: `XLA_PYTHON_CLIENT_PREALLOCATE=false pytest metanca_training/tests/metanca_training/scaling/test__evaluate_pool.py -q`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Add the shared-initializer coverage regression test**
+
+This guards the train/eval hidden-state consistency invariant: an initializer built from the
+spanning arch initializes every extreme arch in-bounds, while a too-shallow initializer
+crashes on a deep arch (documenting why the driver must use `SPANNING_ARCH`).
+
+```python
+# metanca_training/tests/metanca_training/scaling/test__initializer_coverage.py
+import jax
+import pytest
+
+import metanca
+from metanca_training.scaling.arch_grid import SPANNING_ARCH, build_mlp
+
+IN = (784,)
+PE = dict(d_neuron=10, d_layer=10, d_spatial=10)
+
+
+def _initializer_from(widths):
+    tn = metanca.TaskNet.build_many(
+        models=[build_mlp(widths, 10)], input_shapes=[IN], key=jax.random.key(0), **PE
+    )[0]
+    return tn.hidden_state_initializer, tn.hidden_dim
+
+
+def _build_with(widths, shared):
+    return metanca.TaskNet.build(
+        model=build_mlp(widths, 10), input_shape=IN, key=jax.random.key(1),
+        n_spatial_dims=0, shared_initializer=shared, **PE,
+    )
+
+
+def test_spanning_initializer_covers_extreme_archs():
+    shared = _initializer_from(SPANNING_ARCH)
+    for widths in [(512, 512, 512, 512, 512), (32, 32, 32, 32, 32), (512, 32), (32, 32)]:
+        _build_with(widths, shared)  # must not raise (in-bounds for all depths/widths)
+
+
+def test_too_shallow_initializer_raises_on_deep_arch():
+    # asserts must be enabled (pytest default); a depth-2 initializer has n_layers=3
+    shallow = _initializer_from((32, 32))
+    with pytest.raises(AssertionError):
+        _build_with((512, 512, 512, 512, 512), shallow)
+```
+
+- [ ] **Step 6: Run the coverage test**
+
+Run: `XLA_PYTHON_CLIENT_PREALLOCATE=false pytest metanca_training/tests/metanca_training/scaling/test__initializer_coverage.py -q`
+Expected: PASS (spanning initializer covers all; shallow initializer raises on depth-5 arch).
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add metanca_training/src/metanca_training/scaling/evaluate_pool.py \
-        metanca_training/tests/metanca_training/scaling/test__evaluate_pool.py
-git commit -m "feat: per-architecture pool evaluator for scaling ablation"
+        metanca_training/tests/metanca_training/scaling/test__evaluate_pool.py \
+        metanca_training/tests/metanca_training/scaling/test__initializer_coverage.py
+git commit -m "feat: per-arch evaluator + shared-initializer coverage guard"
 ```
 
 ---
@@ -702,7 +771,7 @@ from train import load_dataset  # noqa: E402
 from metanca_training import train_metanca  # noqa: E402
 from metanca_training._hydra_configs import register_configs  # noqa: E402
 from metanca_training.scaling.arch_grid import (  # noqa: E402
-    N_VAL, build_grid, build_mlp, sample_subset, split_grid,
+    N_VAL, SPANNING_ARCH, build_grid, build_mlp, sample_subset, split_grid,
 )
 from metanca_training.scaling.evaluate_pool import evaluate_arch_pool  # noqa: E402
 
@@ -783,7 +852,11 @@ def main() -> None:
 
     n_classes = int(cfg.dataset.output_shape)
     models = [build_mlp(w, n_classes) for w in train_archs]
-    test_model = build_mlp(val_archs[0], n_classes)  # placeholder for in-loop monitor
+    # SPANNING_ARCH (grid max depth x width) makes before_metanca_training's unified
+    # hidden-state initializer span every train + val arch, independent of the sampled
+    # T-subset. Reused at eval via training_vars.test_tasknet.hidden_state_initializer.
+    # It is used only for the initializer + in-loop logging; it is NOT trained on.
+    test_model = build_mlp(SPANNING_ARCH, n_classes)
 
     # Resumes from the per-run checkpoint (local_rule_checkpoints/<run_name>) if present.
     params, tvars = train_metanca(
@@ -876,7 +949,7 @@ from run_scaling import build_cfg  # noqa: E402 (same directory)
 
 from metanca_training import train_metanca  # noqa: E402
 from metanca_training.scaling.arch_grid import (  # noqa: E402
-    N_VAL, build_grid, build_mlp, sample_subset, split_grid,
+    N_VAL, SPANNING_ARCH, build_grid, build_mlp, sample_subset, split_grid,
 )
 
 logger = logging.getLogger(__name__)
@@ -892,7 +965,7 @@ def main() -> None:
     grid = build_grid("fixed5")
     pool, _ = split_grid(grid, N_VAL["fixed5"], seed=1)
     train_archs = sample_subset(pool, args.T - 1, seed=1)
-    train_archs = [(512, 512, 512, 512, 512), *train_archs]  # force the largest arch in
+    train_archs = [SPANNING_ARCH, *train_archs]  # force the largest arch into the pool
 
     cfg = build_cfg("fixed5", "mem_probe", args.metaepochs, seed=0)
     wandb.init(mode="disabled")
@@ -901,7 +974,8 @@ def main() -> None:
     models = [build_mlp(w, 10) for w in train_archs]
 
     t0 = time.time()
-    train_metanca(train_b, val_b, cfg=cfg, models=models, test_model=build_mlp((32,), 10))
+    train_metanca(train_b, val_b, cfg=cfg, models=models,
+                  test_model=build_mlp(SPANNING_ARCH, 10))  # spanning initializer, like real runs
     dt = time.time() - t0
 
     per_epoch = dt / args.metaepochs

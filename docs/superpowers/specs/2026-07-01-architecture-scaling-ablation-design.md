@@ -125,6 +125,39 @@ and recovery is a matter of re-running the same command:
 - **Recovery procedure:** re-run the sweep. Completed runs are skipped, the interrupted run
   resumes training from its checkpoint, and already-evaluated archs are skipped.
 
+## Hidden-state initialization consistency
+
+Every TaskNet's hidden states / positional encodings are produced by a **single unified
+initializer** (`TaskNet.build_many` → `create_unified_initializer`). That initializer bakes
+in buffer sizes from the maximum dimensions of the architectures it is built from, and
+**asserts `0 <= layer_idx < max_n_layers`** — so it must be built to span the **global max
+depth and width across the entire grid, including the held-out validation archs**, or
+evaluating a deeper/wider arch than the training subset saw will crash (or silently clamp).
+
+The positional-encoding *values* are sinusoidal and position-invariant (row `i` is identical
+regardless of table size), so once the buffers are large enough, encodings are identical
+between training and eval. Width is not the binding constraint here: every flat-MLP input
+layer has `in_dim = 784`, which dominates all hidden widths (≤ 512), so the neuron buffer is
+pinned at 784 for any arch. **Depth** is the binding constraint.
+
+Design decision to guarantee coverage and train/eval consistency:
+
+- Define a **spanning architecture** `SPANNING_ARCH = (512, 512, 512, 512, 512)` — the grid's
+  global max depth (5 hidden layers) at max width (512).
+- Build the training-time unified initializer so that it includes the spanning arch: the
+  driver passes `test_model = build_mlp(SPANNING_ARCH, n_classes)` to
+  `before_metanca_training`, so `build_many` computes `max_n_layers`/max-dims over
+  `{T train archs} ∪ {spanning arch}`. This is independent of which random T-subset was
+  sampled, so the initializer always spans the whole grid. The spanning arch is used only
+  for the initializer and in-loop logging — it is **not** trained on.
+- Evaluation reuses this exact initializer via
+  `training_vars.test_tasknet.hidden_state_initializer`, so every train and val arch is
+  initialized identically to training and is guaranteed in-bounds.
+- A regression test asserts (a) every arch in both grids is covered by
+  `len ≤ len(SPANNING_ARCH)` and `max width ≤ max(SPANNING_ARCH)`, and (b) building the
+  spanning-arch initializer lets the extreme archs initialize without error, while a
+  deliberately too-shallow initializer raises on a deep arch.
+
 ## Adam baselines
 
 - A standalone runner trains each of the **246** archs with Adam (lr 1e-3, fixed epoch
