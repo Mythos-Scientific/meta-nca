@@ -22,4 +22,8 @@ wandb
 local_rule_checkpoints/
 .worktrees/
 
+.venv/
+results/
+.superpowers/
+
 .env

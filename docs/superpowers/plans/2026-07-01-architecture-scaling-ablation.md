@@ -345,14 +345,21 @@ def _prepare_fashion_mnist_arrays(images, labels, rand_key):
 
 
 def get_fashion_mnist_datasets(rand_key: jax.random.PRNGKey):
-    """Load Fashion-MNIST via tfds and return standardized flat arrays."""
-    train = tfds.as_numpy(tfds.load("fashion_mnist", split="train", batch_size=-1))
-    test = tfds.as_numpy(tfds.load("fashion_mnist", split="test", batch_size=-1))
-    images = np.concatenate([train["image"], test["image"]], axis=0)  # (N,28,28,1) uint8
-    labels = np.concatenate([train["label"], test["label"]], axis=0)
-    images = images.reshape(images.shape[0], 28, 28)
+    """Load Fashion-MNIST via sklearn OpenML and return standardized flat arrays.
+
+    NOTE: TensorFlow is not installable on this aarch64 host and `tfds.load` requires it,
+    so Fashion-MNIST is loaded from OpenML (mirroring `get_mnist_datasets`'s use of
+    `fetch_openml("mnist_784")`). Returns 70000 flat 784-dim samples, 10 classes.
+    """
+    X, y = datasets.fetch_openml("Fashion-MNIST", version=1, return_X_y=True, as_frame=False)
+    images = np.asarray(X, dtype=np.float32)   # (70000, 784), pixel range 0..255
+    labels = np.asarray(y, dtype=np.int32)
     return _prepare_fashion_mnist_arrays(images, labels, rand_key)
 ```
+
+(`datasets` is already imported in `data_utils.py` as `from sklearn import datasets`; no tfds
+is used for Fashion-MNIST. The `_prepare_fashion_mnist_arrays` helper's `reshape(N, -1)` handles
+both the already-flat OpenML arrays and the `(N,28,28)` arrays used in the unit test.)
 
 - [ ] **Step 4: Run test to verify it passes**
 
