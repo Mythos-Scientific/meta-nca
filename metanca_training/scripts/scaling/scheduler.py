@@ -1,0 +1,145 @@
+#!/usr/bin/env python
+"""Distributed rep-major scheduler for the MetaNCA architecture-scaling sweep.
+
+Runs on the LOCAL box. Distributes (T, rep) training+eval jobs across three GPUs — the
+local GB10 and two RunPod 5090s (over SSH) — with a **hard barrier between reps**: every T
+runs exactly once (rep 0) before any T runs again, so a full scaling curve exists after the
+first pass and each later pass adds a point of statistics to every T.
+
+Within a rep, a dynamic longest-job-first queue keeps the GPUs busy (biggest T -> fastest
+free worker), and the rep only advances once all its jobs' `.done` markers exist. Jobs log
+to wandb (project architecture-scaling-ablation); results are pulled from RunPod after each
+rep. Resumable: already-`.done` jobs are skipped and in-flight jobs are re-attached, so the
+scheduler can be killed and restarted safely.
+"""
+
+import argparse
+import subprocess
+import time
+from pathlib import Path
+
+LOCAL_DIR = "/home/dan/Projects/meta-nca"
+REMOTE_DIR = "/workspace/meta-nca"
+SSH = ["ssh", "-p", "13104", "-i", "/home/dan/.ssh/id_ed25519-runpod",
+       "-o", "ConnectTimeout=25", "root@162.43.172.165"]
+SCP_HOST = "root@162.43.172.165"
+POLL_SECS = 60
+
+# Workers ordered FAST-FIRST so the longest job at a rep's start lands on a 5090, not the GB10.
+WORKERS = [
+    {"name": "rp0", "kind": "ssh", "cuda": "0"},
+    {"name": "rp1", "kind": "ssh", "cuda": "1"},
+    {"name": "gb10", "kind": "local", "cuda": "0"},
+]
+
+
+def _run(cmd: list[str]) -> str:
+    return subprocess.run(cmd, capture_output=True, text=True).stdout.strip()
+
+
+def _ssh(remote: str) -> str:
+    return _run(SSH + [remote])
+
+
+def _run_cmd(T: int, rep: int, ablation: str, metaepochs: int) -> str:
+    return (f"XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python "
+            f"metanca_training/scripts/scaling/run_scaling.py --ablation {ablation} "
+            f"--T {T} --rep {rep} --metaepochs {metaepochs}")
+
+
+def _pgrep_pat(T: int, rep: int, ablation: str) -> str:
+    return f"run_scaling.py --ablation {ablation} --T {T} --rep {rep} "
+
+
+def is_running(worker: dict, T: int, rep: int, ablation: str) -> bool:
+    pat = _pgrep_pat(T, rep, ablation)
+    if worker["kind"] == "local":
+        return bool(_run(["pgrep", "-f", pat]))
+    return bool(_ssh(f"pgrep -f '{pat}'"))
+
+
+def is_done(worker: dict, T: int, rep: int, ablation: str) -> bool:
+    done = f"results/scaling/{ablation}/T{T}_rep{rep}.done"
+    if worker["kind"] == "local":
+        return Path(f"{LOCAL_DIR}/{done}").exists()
+    return _ssh(f"test -f {REMOTE_DIR}/{done} && echo yes") == "yes"
+
+
+def launch(worker: dict, T: int, rep: int, ablation: str, metaepochs: int) -> None:
+    inner = _run_cmd(T, rep, ablation, metaepochs)
+    log = f"sched_{ablation}_T{T}_rep{rep}.log"
+    if worker["kind"] == "local":
+        full = (f"cd {LOCAL_DIR} && CUDA_VISIBLE_DEVICES={worker['cuda']} nohup {inner} "
+                f"> .superpowers/sdd/runlogs/{log} 2>&1 &")
+        subprocess.Popen(["bash", "-lc", full])
+    else:
+        remote = (f"cd {REMOTE_DIR} && CUDA_VISIBLE_DEVICES={worker['cuda']} nohup {inner} "
+                  f"</dev/null > {log} 2>&1 & disown")
+        subprocess.run(SSH + [remote])
+    print(f"  [{worker['name']}] launched T={T} rep={rep}", flush=True)
+
+
+def pull_runpod_results(ablation: str) -> None:
+    Path(f"{LOCAL_DIR}/results/scaling/{ablation}").mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["scp", "-P", "13104", "-i", "/home/dan/.ssh/id_ed25519-runpod",
+         f"{SCP_HOST}:{REMOTE_DIR}/results/scaling/{ablation}/*",
+         f"{LOCAL_DIR}/results/scaling/{ablation}/"],
+        capture_output=True, text=True,
+    )
+    print(f"  pulled RunPod results for {ablation}", flush=True)
+
+
+def run_rep(ablation: str, rep: int, t_list: list[int], metaepochs: int) -> None:
+    pending = sorted(t_list, reverse=True)   # longest-first
+    running: dict[str, tuple[dict, int]] = {}   # worker_name -> (worker, T)
+
+    # Re-attach: skip .done, re-attach in-flight (survives a scheduler restart).
+    for T in list(pending):
+        for w in WORKERS:
+            if is_done(w, T, rep, ablation):
+                print(f"  rep{rep} T={T} already done on {w['name']} — skip", flush=True)
+                pending.remove(T)
+                break
+            if is_running(w, T, rep, ablation):
+                print(f"  rep{rep} T={T} already running on {w['name']} — attach", flush=True)
+                running[w["name"]] = (w, T)
+                pending.remove(T)
+                break
+
+    while pending or running:
+        for w in WORKERS:                       # dispatch to free workers, fast-first
+            if w["name"] not in running and pending:
+                T = pending.pop(0)
+                launch(w, T, rep, ablation, metaepochs)
+                running[w["name"]] = (w, T)
+        time.sleep(POLL_SECS)
+        for name, (w, T) in list(running.items()):
+            if is_done(w, T, rep, ablation):
+                print(f"  [{name}] DONE T={T} rep={rep}", flush=True)
+                del running[name]
+            elif not is_running(w, T, rep, ablation):
+                print(f"  [{name}] job T={T} rep={rep} died w/o .done — relaunching", flush=True)
+                launch(w, T, rep, ablation, metaepochs)   # run_scaling resumes from checkpoint
+    print(f"=== rep {rep} BARRIER reached (all T done) ===", flush=True)
+    pull_runpod_results(ablation)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("--ablation", choices=["fixed5", "varying"], default="fixed5")
+    p.add_argument("--reps", type=lambda s: [int(x) for x in s.split(",")], default=[0, 1, 2])
+    p.add_argument("--t-list", type=lambda s: [int(x) for x in s.split(",")],
+                   default=[1, 2, 4, 8, 16, 32])
+    p.add_argument("--metaepochs", type=int, default=1200)
+    args = p.parse_args()
+    print(f"scheduler: ablation={args.ablation} reps={args.reps} T={args.t_list} "
+          f"workers={[w['name'] for w in WORKERS]}", flush=True)
+    for rep in args.reps:                        # rep-major with barrier between reps
+        print(f"\n===== REP {rep} start =====", flush=True)
+        run_rep(args.ablation, rep, args.t_list, args.metaepochs)
+    print("\n===== ALL REPS COMPLETE =====", flush=True)
+
+
+if __name__ == "__main__":
+    main()
