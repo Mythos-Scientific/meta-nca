@@ -25,11 +25,11 @@ SSH = ["ssh", "-p", "13104", "-i", "/home/dan/.ssh/id_ed25519-runpod",
 SCP_HOST = "root@162.43.172.165"
 POLL_SECS = 60
 
-# RunPod runs each job across BOTH 5090s (multi-GPU path auto-activates when 2 devices are
-# visible, i.e. CUDA_VISIBLE_DEVICES unset) so a single large-T run finishes ~2x faster. The
-# GB10 (1 GPU, slower) only takes small T's (max_t), keeping the big runs on RunPod.
+# RunPod worker pinned to GPU 0 (single-GPU timing test: multi-GPU per-arch dispatch was
+# paying a long serial per-arch compile with idle GPUs; comparing steady rates). Set
+# cuda=None to re-enable multi-GPU (both 5090s per run).
 WORKERS = [
-    {"name": "runpod", "kind": "ssh", "cuda": None, "max_t": 10**9},
+    {"name": "runpod", "kind": "ssh", "cuda": "0", "max_t": 10**9},
     {"name": "gb10", "kind": "local", "cuda": "0", "max_t": 4},
 ]
 
