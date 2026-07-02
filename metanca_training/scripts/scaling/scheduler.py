@@ -84,7 +84,10 @@ def launch(worker: dict, T: int, rep: int, ablation: str, metaepochs: int) -> No
         subprocess.Popen(["bash", "-lc", full])
     else:
         remote = (f"cd {REMOTE_DIR} && {envs}nohup {inner} </dev/null > {log} 2>&1 & disown")
-        subprocess.run(SSH + [remote])
+        # fire-and-forget: ssh can hang holding the session open even after `disown`;
+        # we never need its exit status — the is_running/is_done poll verifies the job.
+        subprocess.Popen(SSH + ["-n"] + [remote],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print(f"  [{worker['name']}] launched T={T} rep={rep}", flush=True)
 
 
