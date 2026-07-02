@@ -13,7 +13,7 @@ import numpy as np
 
 from metanca.nn import MultiLayerPerceptron
 
-WIDTHS: tuple[int, ...] = (32, 64, 128, 256, 512)
+WIDTHS: tuple[int, ...] = (2, 4, 8, 16, 32)
 
 # Held-out validation-architecture counts (~20% of each grid).
 N_VAL: dict[str, int] = {"fixed5": 25, "varying": 49}
@@ -24,7 +24,7 @@ _GRID_DEPTHS: dict[str, list[int]] = {"fixed5": [5], "varying": [2, 3, 4, 5]}
 # (Task 4 `grid_hidden_state_initializer`). The initializer's layer table must cover
 # MAX_HIDDEN_LAYERS + 1 (output) positions and its neuron table max(input_dim, MAX_HIDDEN_WIDTH).
 # See spec "Hidden-state initialization consistency".
-MAX_HIDDEN_WIDTH: int = max(WIDTHS)                    # 512
+MAX_HIDDEN_WIDTH: int = max(WIDTHS)                    # 32
 MAX_HIDDEN_LAYERS: int = max(_GRID_DEPTHS["varying"])  # 5
 
 
