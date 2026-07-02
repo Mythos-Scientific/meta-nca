@@ -88,7 +88,12 @@ def is_running(worker: dict, T: int, rep: int, ablation: str) -> bool:
     pat = _pgrep_pat(T, rep, ablation)
     if worker["kind"] == "local":
         return bool(_run(["pgrep", "-f", pat]))
-    return bool(_ssh(f"pgrep -f '{pat}'"))
+    # Two ssh workers share one host: attribute a job to THIS worker only if a matching
+    # process is pinned to this worker's GPU (CUDA_VISIBLE_DEVICES in its environ).
+    check = (f"for p in $(pgrep -f '{pat}'); do "
+             f"tr '\\0' '\\n' < /proc/$p/environ 2>/dev/null "
+             f"| grep -qx 'CUDA_VISIBLE_DEVICES={worker['cuda']}' && echo yes && break; done")
+    return _ssh(check) == "yes"
 
 
 def is_done(worker: dict, T: int, rep: int, ablation: str) -> bool:
@@ -169,6 +174,14 @@ def run_rep(ablation: str, rep: int, t_list: list[int], metaepochs: int) -> None
                 print(f"  [{name}] DONE T={T} rep={rep}", flush=True)
                 del running[name]
             elif not is_running(w, T, rep, ablation):
+                # duplicate-launch guard: never relaunch while ANY matching process exists
+                # anywhere (transient ssh failure or GPU mis-attribution must not fork the run)
+                pat = _pgrep_pat(T, rep, ablation)
+                anywhere = bool(_run(["pgrep", "-f", pat])) or bool(_ssh(f"pgrep -f '{pat}'"))
+                if anywhere:
+                    print(f"  [{name}] T={T} rep={rep} not attributable but alive somewhere — "
+                          f"skipping relaunch this poll", flush=True)
+                    continue
                 print(f"  [{name}] job T={T} rep={rep} died w/o .done — relaunching", flush=True)
                 launch(w, T, rep, ablation, metaepochs)   # run_scaling resumes from checkpoint
     print(f"=== rep {rep} BARRIER reached (all T done) ===", flush=True)
