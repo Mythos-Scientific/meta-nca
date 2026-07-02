@@ -25,11 +25,12 @@ SSH = ["ssh", "-p", "13104", "-i", "/home/dan/.ssh/id_ed25519-runpod",
 SCP_HOST = "root@162.43.172.165"
 POLL_SECS = 60
 
-# Workers ordered FAST-FIRST so the longest job at a rep's start lands on a 5090, not the GB10.
+# RunPod runs each job across BOTH 5090s (multi-GPU path auto-activates when 2 devices are
+# visible, i.e. CUDA_VISIBLE_DEVICES unset) so a single large-T run finishes ~2x faster. The
+# GB10 (1 GPU, slower) only takes small T's (max_t), keeping the big runs on RunPod.
 WORKERS = [
-    {"name": "rp0", "kind": "ssh", "cuda": "0"},
-    {"name": "rp1", "kind": "ssh", "cuda": "1"},
-    {"name": "gb10", "kind": "local", "cuda": "0"},
+    {"name": "runpod", "kind": "ssh", "cuda": None, "max_t": 10**9},
+    {"name": "gb10", "kind": "local", "cuda": "0", "max_t": 4},
 ]
 
 
@@ -68,13 +69,14 @@ def is_done(worker: dict, T: int, rep: int, ablation: str) -> bool:
 def launch(worker: dict, T: int, rep: int, ablation: str, metaepochs: int) -> None:
     inner = _run_cmd(T, rep, ablation, metaepochs)
     log = f"sched_{ablation}_T{T}_rep{rep}.log"
+    # cuda=None -> leave all GPUs visible (RunPod multi-GPU); else pin to one device.
+    cuda = "" if worker["cuda"] is None else f"CUDA_VISIBLE_DEVICES={worker['cuda']} "
     if worker["kind"] == "local":
-        full = (f"cd {LOCAL_DIR} && CUDA_VISIBLE_DEVICES={worker['cuda']} nohup {inner} "
+        full = (f"cd {LOCAL_DIR} && {cuda}nohup {inner} "
                 f"> .superpowers/sdd/runlogs/{log} 2>&1 &")
         subprocess.Popen(["bash", "-lc", full])
     else:
-        remote = (f"cd {REMOTE_DIR} && CUDA_VISIBLE_DEVICES={worker['cuda']} nohup {inner} "
-                  f"</dev/null > {log} 2>&1 & disown")
+        remote = (f"cd {REMOTE_DIR} && {cuda}nohup {inner} </dev/null > {log} 2>&1 & disown")
         subprocess.run(SSH + [remote])
     print(f"  [{worker['name']}] launched T={T} rep={rep}", flush=True)
 
@@ -108,11 +110,16 @@ def run_rep(ablation: str, rep: int, t_list: list[int], metaepochs: int) -> None
                 break
 
     while pending or running:
-        for w in WORKERS:                       # dispatch to free workers, fast-first
-            if w["name"] not in running and pending:
-                T = pending.pop(0)
-                launch(w, T, rep, ablation, metaepochs)
-                running[w["name"]] = (w, T)
+        for w in WORKERS:                       # give each free worker its largest eligible T
+            if w["name"] in running:
+                continue
+            eligible = [t for t in pending if t <= w["max_t"]]
+            if not eligible:
+                continue
+            T = max(eligible)
+            pending.remove(T)
+            launch(w, T, rep, ablation, metaepochs)
+            running[w["name"]] = (w, T)
         time.sleep(POLL_SECS)
         for name, (w, T) in list(running.items()):
             if is_done(w, T, rep, ablation):
