@@ -25,5 +25,6 @@ local_rule_checkpoints/
 .venv/
 results/
 .superpowers/
+.jax_cache/
 
 .env

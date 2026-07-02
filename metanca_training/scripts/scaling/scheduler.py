@@ -72,7 +72,12 @@ def launch(worker: dict, T: int, rep: int, ablation: str, metaepochs: int) -> No
     # env vars must come BEFORE nohup (they apply to the command nohup runs). cuda=None ->
     # leave all GPUs visible (RunPod multi-GPU); else pin to one device.
     cuda = "" if worker["cuda"] is None else f"CUDA_VISIBLE_DEVICES={worker['cuda']} "
-    envs = f"{cuda}XLA_PYTHON_CLIENT_PREALLOCATE=false "
+    # Persistent XLA compilation cache: (arch shape, n_update_steps) programs recur across
+    # runs (overlapping archs between reps/T's, and every run's eval of the same 25 val
+    # archs), so caching to disk eliminates most repeat compile tax after first encounter.
+    cache_dir = f"{LOCAL_DIR}/.jax_cache" if worker["kind"] == "local" else f"{REMOTE_DIR}/.jax_cache"
+    envs = (f"{cuda}XLA_PYTHON_CLIENT_PREALLOCATE=false "
+            f"JAX_COMPILATION_CACHE_DIR={cache_dir} ")
     if worker["kind"] == "local":
         full = (f"cd {LOCAL_DIR} && {envs}nohup {inner} "
                 f"> .superpowers/sdd/runlogs/{log} 2>&1 &")
