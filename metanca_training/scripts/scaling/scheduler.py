@@ -43,13 +43,13 @@ def _ssh(remote: str) -> str:
 
 
 def _run_cmd(T: int, rep: int, ablation: str, metaepochs: int) -> str:
-    return (f"XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python "
-            f"metanca_training/scripts/scaling/run_scaling.py --ablation {ablation} "
-            f"--T {T} --rep {rep} --metaepochs {metaepochs}")
+    return (f".venv/bin/python metanca_training/scripts/scaling/run_scaling.py "
+            f"--ablation {ablation} --T {T} --rep {rep} --metaepochs {metaepochs}")
 
 
 def _pgrep_pat(T: int, rep: int, ablation: str) -> str:
-    return f"run_scaling.py --ablation {ablation} --T {T} --rep {rep} "
+    # no trailing space: matches both scheduler-launched (…--rep 0 --metaepochs) and manual runs
+    return f"run_scaling.py --ablation {ablation} --T {T} --rep {rep}"
 
 
 def is_running(worker: dict, T: int, rep: int, ablation: str) -> bool:
@@ -69,14 +69,16 @@ def is_done(worker: dict, T: int, rep: int, ablation: str) -> bool:
 def launch(worker: dict, T: int, rep: int, ablation: str, metaepochs: int) -> None:
     inner = _run_cmd(T, rep, ablation, metaepochs)
     log = f"sched_{ablation}_T{T}_rep{rep}.log"
-    # cuda=None -> leave all GPUs visible (RunPod multi-GPU); else pin to one device.
+    # env vars must come BEFORE nohup (they apply to the command nohup runs). cuda=None ->
+    # leave all GPUs visible (RunPod multi-GPU); else pin to one device.
     cuda = "" if worker["cuda"] is None else f"CUDA_VISIBLE_DEVICES={worker['cuda']} "
+    envs = f"{cuda}XLA_PYTHON_CLIENT_PREALLOCATE=false "
     if worker["kind"] == "local":
-        full = (f"cd {LOCAL_DIR} && {cuda}nohup {inner} "
+        full = (f"cd {LOCAL_DIR} && {envs}nohup {inner} "
                 f"> .superpowers/sdd/runlogs/{log} 2>&1 &")
         subprocess.Popen(["bash", "-lc", full])
     else:
-        remote = (f"cd {REMOTE_DIR} && {cuda}nohup {inner} </dev/null > {log} 2>&1 & disown")
+        remote = (f"cd {REMOTE_DIR} && {envs}nohup {inner} </dev/null > {log} 2>&1 & disown")
         subprocess.run(SSH + [remote])
     print(f"  [{worker['name']}] launched T={T} rep={rep}", flush=True)
 
