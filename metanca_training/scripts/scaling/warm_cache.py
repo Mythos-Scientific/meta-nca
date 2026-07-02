@@ -11,7 +11,7 @@ instead of recompiling — decoupling the (CPU-bound, GPU-idle) compile phase fr
 Usage (env JAX_COMPILATION_CACHE_DIR must match the one the scheduler passes to runs):
     JAX_COMPILATION_CACHE_DIR=$PWD/.jax_cache XLA_PYTHON_CLIENT_PREALLOCATE=false \
         .venv/bin/python metanca_training/scripts/scaling/warm_cache.py \
-        --ablation fixed5 --T 16 --rep 0 [--steps 1,2,3,4,5,6,7,8,9,10] [--skip-eval]
+        --ablation fixed3 --T 16 --rep 0 [--steps 1,2,3,4,5,6,7,8,9,10] [--skip-eval]
 
 Notes:
 - Run it on the SAME machine (and GPU count) as the target run: multi-GPU runs compile
@@ -56,7 +56,7 @@ logger = logging.getLogger("warm_cache")
 def main() -> None:
     logging.basicConfig(level=logging.INFO, force=True)
     p = argparse.ArgumentParser()
-    p.add_argument("--ablation", choices=["fixed5", "varying"], default="fixed5")
+    p.add_argument("--ablation", choices=["fixed3", "varying"], default="fixed3")
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--rep", type=int, required=True)
     p.add_argument("--steps", type=lambda s: [int(x) for x in s.split(",")],

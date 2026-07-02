@@ -88,7 +88,7 @@ def main() -> None:
     X, y, tr, va = get_fashion_mnist_datasets(key)
     train_b, val_b = prepare_batches(X, y, tr, va, batch_size=512)
 
-    # varying grid contains all 246 archs (fixed5 subset included)
+    # varying grid (121 archs); contains every fixed3 arch as its depth-3 slice
     grid = build_grid("varying")
     # shard across GPUs: strided slice keeps depth/size mix balanced per shard
     grid = grid[args.shard_index :: args.num_shards]

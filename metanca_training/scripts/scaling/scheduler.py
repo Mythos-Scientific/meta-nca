@@ -141,10 +141,10 @@ def run_rep(ablation: str, rep: int, t_list: list[int], metaepochs: int) -> None
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--ablation", choices=["fixed5", "varying"], default="fixed5")
+    p.add_argument("--ablation", choices=["fixed3", "varying"], default="fixed3")
     p.add_argument("--reps", type=lambda s: [int(x) for x in s.split(",")], default=[0, 1, 2])
     p.add_argument("--t-list", type=lambda s: [int(x) for x in s.split(",")],
-                   default=[1, 2, 4, 8, 16, 32])
+                   default=[1, 2, 4, 8])
     p.add_argument("--metaepochs", type=int, default=1200)
     args = p.parse_args()
     print(f"scheduler: ablation={args.ablation} reps={args.reps} T={args.t_list} "

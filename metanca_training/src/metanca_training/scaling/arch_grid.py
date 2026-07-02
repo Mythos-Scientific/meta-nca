@@ -13,18 +13,20 @@ import numpy as np
 
 from metanca.nn import MultiLayerPerceptron
 
-WIDTHS: tuple[int, ...] = (16, 32, 64, 128, 256)
+WIDTHS: tuple[int, ...] = (16, 32, 64, 128)
 
-# Held-out validation-architecture counts (~20% of each grid).
-N_VAL: dict[str, int] = {"fixed5": 25, "varying": 49}
+# Held-out validation-architecture counts.
+# fixed3: 20 archs total -> hold out 8, training pool 12 (T in {1,2,4,8[,12]}).
+N_VAL: dict[str, int] = {"fixed3": 8, "varying": 24}
 
-_GRID_DEPTHS: dict[str, list[int]] = {"fixed5": [5], "varying": [2, 3, 4, 5]}
+_GRID_DEPTHS: dict[str, list[int]] = {"fixed3": [3], "varying": [2, 3, 4, 5]}
 
 # Grid-wide maxima used to provision the explicit grid-max hidden-state initializer
-# (Task 4 `grid_hidden_state_initializer`). The initializer's layer table must cover
+# (`grid_hidden_state_initializer`). The initializer's layer table must cover
 # MAX_HIDDEN_LAYERS + 1 (output) positions and its neuron table max(input_dim, MAX_HIDDEN_WIDTH).
-# See spec "Hidden-state initialization consistency".
-MAX_HIDDEN_WIDTH: int = max(WIDTHS)                    # 256
+# Provisioned to the varying-grid max depth so both ablations share one provisioning
+# (PE values are position-invariant; oversized tables are harmless).
+MAX_HIDDEN_WIDTH: int = max(WIDTHS)                    # 128
 MAX_HIDDEN_LAYERS: int = max(_GRID_DEPTHS["varying"])  # 5
 
 

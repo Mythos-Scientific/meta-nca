@@ -7,7 +7,7 @@ from metanca_training.scaling.arch_grid import (
 
 def test_grid_maxima_bound_both_grids():
     # provisioning constants must upper-bound every arch in both grids
-    for kind in ("fixed5", "varying"):
+    for kind in ("fixed3", "varying"):
         for w in build_grid(kind):
             assert len(w) <= MAX_HIDDEN_LAYERS          # depth covered
             assert max(w) <= MAX_HIDDEN_WIDTH           # width covered
@@ -15,10 +15,11 @@ def test_grid_maxima_bound_both_grids():
 
 
 def test_enumerate_counts_per_depth():
-    assert len(enumerate_arch_widths([2])) == 15
-    assert len(enumerate_arch_widths([3])) == 35
-    assert len(enumerate_arch_widths([4])) == 70
-    assert len(enumerate_arch_widths([5])) == 126
+    # C(len(WIDTHS)+d-1, d) with 4 widths
+    assert len(enumerate_arch_widths([2])) == 10
+    assert len(enumerate_arch_widths([3])) == 20
+    assert len(enumerate_arch_widths([4])) == 35
+    assert len(enumerate_arch_widths([5])) == 56
 
 
 def test_enumerate_non_increasing_and_valid_widths():
@@ -33,31 +34,31 @@ def test_enumerate_no_duplicates():
 
 
 def test_build_grid_sizes():
-    assert len(build_grid("fixed5")) == 126
-    assert len(build_grid("varying")) == 246
-    assert all(len(w) == 5 for w in build_grid("fixed5"))
+    assert len(build_grid("fixed3")) == 20
+    assert len(build_grid("varying")) == 121
+    assert all(len(w) == 3 for w in build_grid("fixed3"))
     assert {len(w) for w in build_grid("varying")} == {2, 3, 4, 5}
 
 
 def test_arch_id_and_layer_specs():
-    assert arch_id((512, 128, 64)) == "d3_512-128-64"
-    assert arch_layer_specs((512, 128, 64), 10) == [512, 128, 64, 10]
+    assert arch_id((128, 64, 16)) == "d3_128-64-16"
+    assert arch_layer_specs((128, 64, 16), 10) == [128, 64, 16, 10]
 
 
 def test_split_grid_deterministic_disjoint():
-    grid = build_grid("fixed5")
-    pool_a, val_a = split_grid(grid, N_VAL["fixed5"], seed=0)
-    pool_b, val_b = split_grid(grid, N_VAL["fixed5"], seed=0)
+    grid = build_grid("fixed3")
+    pool_a, val_a = split_grid(grid, N_VAL["fixed3"], seed=0)
+    pool_b, val_b = split_grid(grid, N_VAL["fixed3"], seed=0)
     assert val_a == val_b and pool_a == pool_b            # deterministic
-    assert len(val_a) == 25 and len(pool_a) == 101
+    assert len(val_a) == 8 and len(pool_a) == 12
     assert set(pool_a).isdisjoint(set(val_a))
     assert set(pool_a) | set(val_a) == set(grid)
-    _, val_c = split_grid(grid, N_VAL["fixed5"], seed=1)
+    _, val_c = split_grid(grid, N_VAL["fixed3"], seed=1)
     assert val_c != val_a                                 # seed changes split
 
 
 def test_sample_subset_size_and_membership():
-    pool, _ = split_grid(build_grid("fixed5"), N_VAL["fixed5"], seed=0)
+    pool, _ = split_grid(build_grid("fixed3"), N_VAL["fixed3"], seed=0)
     sub = sample_subset(pool, 5, seed=3)
     assert len(sub) == 5 and set(sub).issubset(set(pool))
     assert sample_subset(pool, 5, seed=3) == sub          # deterministic

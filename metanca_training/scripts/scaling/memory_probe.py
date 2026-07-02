@@ -42,13 +42,13 @@ def main() -> None:
     p.add_argument("--eval-archs", type=int, default=5, help="# distinct archs to time eval on")
     args = p.parse_args()
 
-    grid = build_grid("fixed5")
-    pool, val_archs = split_grid(grid, N_VAL["fixed5"], seed=1)
+    grid = build_grid("fixed3")
+    pool, val_archs = split_grid(grid, N_VAL["fixed3"], seed=1)
     train_archs = sample_subset(pool, args.T - 1, seed=1)
-    largest = (512, 512, 512, 512, 512)  # grid max depth x width -> worst-case memory
+    largest = max(grid, key=lambda w: sum(w))  # heaviest arch in grid -> worst-case memory
     train_archs = [largest, *train_archs]  # force the largest arch into the pool
 
-    cfg = build_cfg("fixed5", "mem_probe", args.metaepochs, seed=0)
+    cfg = build_cfg("fixed3", "mem_probe", args.metaepochs, seed=0)
     # Time at the saturated step count via a constant schedule (constant_update_step reads
     # training.num_epochs as the fixed step count).
     cfg.training.update_step_scheduler_type = "constant"
@@ -92,7 +92,7 @@ def main() -> None:
     )
     te = time.time() - te0
     per_arch = te / len(eval_archs)
-    n_eval_real = args.T + N_VAL["fixed5"]
+    n_eval_real = args.T + N_VAL["fixed3"]
     eval_proj_h = per_arch * n_eval_real / 3600
 
     logger.info("=== TRAINING (T=%d, steps=%d) ===", args.T, args.steps)

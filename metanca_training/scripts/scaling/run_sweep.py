@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-TS = [1, 2, 4, 8, 16, 32]
+TS = [1, 2, 4, 8]
 REPS = [0, 1, 2]
 HERE = Path(__file__).resolve().parent
 
@@ -17,11 +17,11 @@ def _int_list(s: str) -> list[int]:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--ablation", choices=["fixed5", "varying"], required=True)
+    p.add_argument("--ablation", choices=["fixed3", "varying"], required=True)
     p.add_argument("--metaepochs", type=int, default=1200)
     p.add_argument("--results-dir", type=str, default="results/scaling")
     p.add_argument("--t-list", type=_int_list, default=TS,
-                   help="comma-separated T values (default 1,2,4,8,16,32)")
+                   help="comma-separated T values (default 1,2,4,8)")
     p.add_argument("--reps", type=_int_list, default=REPS,
                    help="comma-separated rep indices (default 0,1,2)")
     p.add_argument("--dry-run", action="store_true")

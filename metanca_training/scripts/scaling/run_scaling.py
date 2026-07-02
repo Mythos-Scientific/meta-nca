@@ -65,7 +65,7 @@ def _existing_arch_ids(path: Path) -> set[str]:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, force=True)
     p = argparse.ArgumentParser()
-    p.add_argument("--ablation", choices=["fixed5", "varying"], required=True)
+    p.add_argument("--ablation", choices=["fixed3", "varying"], required=True)
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--rep", type=int, required=True)
     p.add_argument("--metaepochs", type=int, default=1200)

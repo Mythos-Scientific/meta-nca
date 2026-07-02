@@ -13,10 +13,10 @@ from metanca_training.scaling.plotting import (
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--results-dir", required=True,
-                   help="per-ablation dir, e.g. results/scaling/fixed5")
+                   help="per-ablation dir, e.g. results/scaling/fixed3")
     p.add_argument("--adam", default=None)
     p.add_argument("--outdir", default="results/figures")
-    p.add_argument("--tag", default="fixed5")
+    p.add_argument("--tag", default="fixed3")
     args = p.parse_args()
 
     rows = load_results_dir(args.results_dir)
