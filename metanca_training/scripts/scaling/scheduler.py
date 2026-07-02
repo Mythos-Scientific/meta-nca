@@ -25,11 +25,13 @@ SSH = ["ssh", "-p", "13104", "-i", "/home/dan/.ssh/id_ed25519-runpod",
 SCP_HOST = "root@162.43.172.165"
 POLL_SECS = 60
 
-# RunPod worker pinned to GPU 0 (single-GPU timing test: multi-GPU per-arch dispatch was
-# paying a long serial per-arch compile with idle GPUs; comparing steady rates). Set
-# cuda=None to re-enable multi-GPU (both 5090s per run).
+# Measured (fixed3): single-GPU beats multi-GPU decisively (T=8 single: 11.1 s/metaepoch
+# @n=1 after one ~14min compile; multi-GPU: still compiling per-arch programs at 10min with
+# GPUs idle). So each 5090 is its own single-GPU worker — two jobs run in parallel on the
+# node, both within the same rep (rep-major barrier preserved).
 WORKERS = [
-    {"name": "runpod", "kind": "ssh", "cuda": "0", "max_t": 10**9},
+    {"name": "runpod0", "kind": "ssh", "cuda": "0", "max_t": 10**9},
+    {"name": "runpod1", "kind": "ssh", "cuda": "1", "max_t": 10**9},
     {"name": "gb10", "kind": "local", "cuda": "0", "max_t": 4},
 ]
 
