@@ -32,8 +32,38 @@ POLL_SECS = 60
 WORKERS = [
     {"name": "runpod0", "kind": "ssh", "cuda": "0", "max_t": 10**9},
     {"name": "runpod1", "kind": "ssh", "cuda": "1", "max_t": 10**9},
-    {"name": "gb10", "kind": "local", "cuda": "0", "max_t": 4},
+    {"name": "gb10", "kind": "local", "cuda": "0", "max_t": 2},  # ~2x slower: small T only
 ]
+
+RSYNC = ["rsync", "-az", "-e", "ssh -p 13104 -i /home/dan/.ssh/id_ed25519-runpod"]
+
+
+def sync_job_state(worker: dict, T: int, rep: int, ablation: str) -> None:
+    """Before launching on `worker`, pull this run's checkpoint + partial eval rows from the
+    OTHER machine (if present) so a job can migrate/resume anywhere. Orbax step dirs are
+    finalized atomically by rename, so rsync of completed steps is safe; resume picks the
+    latest complete step."""
+    ckpt = f"local_rule_checkpoints/scaling_{ablation}_T{T}_rep{rep}"
+    jsonl = f"results/scaling/{ablation}/T{T}_rep{rep}.jsonl"
+    if worker["kind"] == "local":   # migrating remote -> local: pull
+        Path(f"{LOCAL_DIR}/local_rule_checkpoints").mkdir(exist_ok=True)
+        Path(f"{LOCAL_DIR}/results/scaling/{ablation}").mkdir(parents=True, exist_ok=True)
+        subprocess.run(RSYNC + [f"{SCP_HOST}:{REMOTE_DIR}/{ckpt}",
+                                f"{LOCAL_DIR}/local_rule_checkpoints/"],
+                       capture_output=True, text=True)
+        subprocess.run(RSYNC + [f"{SCP_HOST}:{REMOTE_DIR}/{jsonl}",
+                                f"{LOCAL_DIR}/results/scaling/{ablation}/"],
+                       capture_output=True, text=True)
+    else:                            # migrating local -> remote: push (if local state exists)
+        _ssh(f"mkdir -p {REMOTE_DIR}/local_rule_checkpoints {REMOTE_DIR}/results/scaling/{ablation}")
+        if Path(f"{LOCAL_DIR}/{ckpt}").exists():
+            subprocess.run(RSYNC + [f"{LOCAL_DIR}/{ckpt}",
+                                    f"{SCP_HOST}:{REMOTE_DIR}/local_rule_checkpoints/"],
+                           capture_output=True, text=True)
+        if Path(f"{LOCAL_DIR}/{jsonl}").exists():
+            subprocess.run(RSYNC + [f"{LOCAL_DIR}/{jsonl}",
+                                    f"{SCP_HOST}:{REMOTE_DIR}/results/scaling/{ablation}/"],
+                           capture_output=True, text=True)
 
 
 def _run(cmd: list[str]) -> str:
@@ -69,6 +99,7 @@ def is_done(worker: dict, T: int, rep: int, ablation: str) -> bool:
 
 
 def launch(worker: dict, T: int, rep: int, ablation: str, metaepochs: int) -> None:
+    sync_job_state(worker, T, rep, ablation)   # enables cross-machine resume/migration
     inner = _run_cmd(T, rep, ablation, metaepochs)
     log = f"sched_{ablation}_T{T}_rep{rep}.log"
     # env vars must come BEFORE nohup (they apply to the command nohup runs). cuda=None ->
