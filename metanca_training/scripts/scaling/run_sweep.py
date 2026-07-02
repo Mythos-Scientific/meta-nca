@@ -18,7 +18,7 @@ def _int_list(s: str) -> list[int]:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--ablation", choices=["fixed5", "varying"], required=True)
-    p.add_argument("--metaepochs", type=int, default=12000)
+    p.add_argument("--metaepochs", type=int, default=1200)
     p.add_argument("--results-dir", type=str, default="results/scaling")
     p.add_argument("--t-list", type=_int_list, default=TS,
                    help="comma-separated T values (default 1,2,4,8,16,32)")

@@ -38,7 +38,7 @@ def build_cfg(ablation: str, run_name: str, metaepochs: int, seed: int):
                 "dataset=fashion_mnist", "wandb=disabled",
                 f"training.num_metaepochs={metaepochs}",
                 "training.update_step_scheduler_type=increment",
-                "training.update_step_scheduler_rate=1000",
+                "training.update_step_scheduler_rate=100",
                 "training.update_step_scheduler_max_steps=10",
                 "training.early_stopping_enabled=false",
                 "training.sample_pooling.enabled=false",
@@ -68,7 +68,7 @@ def main() -> None:
     p.add_argument("--ablation", choices=["fixed5", "varying"], required=True)
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--rep", type=int, required=True)
-    p.add_argument("--metaepochs", type=int, default=12000)
+    p.add_argument("--metaepochs", type=int, default=1200)
     p.add_argument("--results-dir", type=str, default="results/scaling")
     p.add_argument("--smoke", action="store_true")
     args = p.parse_args()
