@@ -35,6 +35,9 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--out", type=str, default="results/adam_baselines_fashion_mnist.json")
+    p.add_argument("--num-shards", type=int, default=1,
+                   help="split the grid across N processes (run one per GPU)")
+    p.add_argument("--shard-index", type=int, default=0, help="this process's shard [0, num_shards)")
     p.add_argument("--smoke", action="store_true")
     args = p.parse_args()
 
@@ -42,8 +45,10 @@ def main() -> None:
     X, y, tr, va = get_fashion_mnist_datasets(key)
     train_b, val_b = prepare_batches(X, y, tr, va, batch_size=512)
 
-    # union of both grids == varying grid (246 archs); fixed5 ⊂ varying
+    # varying grid contains all 246 archs (fixed5 subset included)
     grid = build_grid("varying")
+    # shard across GPUs: strided slice keeps depth/size mix balanced per shard
+    grid = grid[args.shard_index :: args.num_shards]
     if args.smoke:
         grid = grid[:3]
         args.epochs = 1
