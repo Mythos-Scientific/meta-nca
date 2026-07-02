@@ -28,8 +28,10 @@ def main() -> None:
     args = p.parse_args()
 
     env = {**os.environ, "XLA_PYTHON_CLIENT_PREALLOCATE": "false"}
-    for t in args.t_list:
-        for rep in args.reps:
+    # rep-major: complete a full T-curve for rep 0, then rep 1, ... so a full (low-n) curve
+    # lands early and statistical significance builds up rep by rep.
+    for rep in args.reps:
+        for t in args.t_list:
             done = Path(args.results_dir) / args.ablation / f"T{t}_rep{rep}.done"
             if done.exists():
                 print(f"skip (done): {done}", flush=True)

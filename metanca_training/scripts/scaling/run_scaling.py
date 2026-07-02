@@ -18,7 +18,7 @@ from train import load_dataset  # noqa: E402
 from metanca_training import train_metanca  # noqa: E402
 from metanca_training._hydra_configs import register_configs  # noqa: E402
 from metanca_training.scaling.arch_grid import (  # noqa: E402
-    N_VAL, build_grid, build_mlp, sample_subset, split_grid,
+    N_VAL, WIDTHS, build_grid, build_mlp, sample_subset, split_grid,
 )
 from metanca_training.scaling.hidden_state import grid_hidden_state_initializer  # noqa: E402
 from metanca_training.scaling.evaluate_pool import evaluate_arch_pool  # noqa: E402
@@ -94,7 +94,20 @@ def main() -> None:
                 args.ablation, args.T, args.rep, len(pool), len(val_archs), len(train_archs))
 
     cfg = build_cfg(args.ablation, run_name, args.metaepochs, seed)
-    wandb.init(mode="disabled")
+    # Log every scaling run to wandb (project: architecture-scaling-ablation). Use the run_name
+    # as a stable id + resume="allow" so a resumed run continues the same wandb run. Smoke runs
+    # stay disabled.
+    wandb.init(
+        project="architecture-scaling-ablation",
+        name=run_name,
+        id=run_name,
+        resume="allow",
+        mode=("disabled" if args.smoke else "online"),
+        config={
+            "ablation": args.ablation, "T": args.T, "rep": args.rep, "seed": seed,
+            "metaepochs": args.metaepochs, "widths": list(WIDTHS),
+        },
+    )
 
     key = jax.random.key(seed)
     train_batches, val_batches = load_dataset(cfg, key)
