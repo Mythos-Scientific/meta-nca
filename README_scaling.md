@@ -66,3 +66,14 @@ cd metanca_training && XLA_PYTHON_CLIENT_PREALLOCATE=false \
 5. Fixed-depth (D=5) sweep.
 6. Varying-depth (D=2..5) sweep.
 7. Plots (loss + accuracy) for both ablations.
+
+## Data-split design note (2026-07-03)
+
+Each scaling run splits Fashion-MNIST 80/20 with a key derived from its run seed
+(`seed = 1000*T + rep`). The split is loaded once per process and reused for both
+meta-training and the end-of-run per-arch evaluation, and is reconstructed identically on
+resume/migration — so **within a run, every train/val architecture is evaluated on the same
+validation data**. Across runs, aggregates mix slightly different 14k-sample splits
+(±~0.3% accuracy noise per run; ~±0.15% after 3 reps). The Adam baseline table used the
+`key(0)` split, so per-arch MetaNCA-vs-Adam comparisons carry ~±0.3–0.4% cross-split noise.
+Decision: accepted (effects of interest are 10–50×), kept uniform rather than mixing regimes.
