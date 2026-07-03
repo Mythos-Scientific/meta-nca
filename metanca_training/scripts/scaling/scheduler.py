@@ -103,6 +103,34 @@ def is_done(worker: dict, T: int, rep: int, ablation: str) -> bool:
     return _ssh(f"test -f {REMOTE_DIR}/{done} && echo yes") == "yes"
 
 
+STALL_SECS = 1200  # no log output for 20 min => hung (a healthy run logs every metaepoch)
+
+
+def is_stalled(worker: dict, T: int, rep: int, ablation: str) -> bool:
+    """A run whose log hasn't been written in STALL_SECS is hung (observed: process alive
+    at ~0% CPU, log silent for hours). Detect via log mtime so the poll loop can kill+requeue."""
+    log = f"sched_{ablation}_T{T}_rep{rep}.log"
+    if worker["kind"] == "local":
+        p = Path(f"{LOCAL_DIR}/.superpowers/sdd/runlogs/{log}")
+        try:
+            return (time.time() - p.stat().st_mtime) > STALL_SECS
+        except OSError:
+            return False
+    out = _ssh(f"echo $(( $(date +%s) - $(stat -c %Y {REMOTE_DIR}/{log} 2>/dev/null || date +%s) ))")
+    try:
+        return int(out) > STALL_SECS
+    except ValueError:
+        return False
+
+
+def kill_job(worker: dict, T: int, rep: int, ablation: str) -> None:
+    pat = _pgrep_pat(T, rep, ablation)
+    if worker["kind"] == "local":
+        _run(["pkill", "-9", "-f", pat])
+    else:
+        _ssh(f"pkill -9 -f '{pat}'")
+
+
 def launch(worker: dict, T: int, rep: int, ablation: str, metaepochs: int) -> None:
     sync_job_state(worker, T, rep, ablation)   # enables cross-machine resume/migration
     inner = _run_cmd(T, rep, ablation, metaepochs)
@@ -173,6 +201,12 @@ def run_rep(ablation: str, rep: int, t_list: list[int], metaepochs: int) -> None
             if is_done(w, T, rep, ablation):
                 print(f"  [{name}] DONE T={T} rep={rep}", flush=True)
                 del running[name]
+            elif is_running(w, T, rep, ablation) and is_stalled(w, T, rep, ablation):
+                print(f"  [{name}] T={T} rep={rep} STALLED (log silent >{STALL_SECS}s) — "
+                      f"killing and requeueing", flush=True)
+                kill_job(w, T, rep, ablation)
+                del running[name]
+                pending.append(T)
             elif not is_running(w, T, rep, ablation):
                 # duplicate-launch guard: never relaunch while ANY matching process exists
                 # anywhere (transient ssh failure or GPU mis-attribution must not fork the run)
