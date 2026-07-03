@@ -182,8 +182,13 @@ def run_rep(ablation: str, rep: int, t_list: list[int], metaepochs: int) -> None
                     print(f"  [{name}] T={T} rep={rep} not attributable but alive somewhere — "
                           f"skipping relaunch this poll", flush=True)
                     continue
-                print(f"  [{name}] job T={T} rep={rep} died w/o .done — relaunching", flush=True)
-                launch(w, T, rep, ablation, metaepochs)   # run_scaling resumes from checkpoint
+                # died w/o .done: REQUEUE rather than relaunch-in-place, so the dispatch loop
+                # reassigns to the best free eligible worker (max_t respected — this is also
+                # the migration path: kill a job on a slow worker and it moves to a fast one,
+                # resuming from its synced checkpoint).
+                print(f"  [{name}] job T={T} rep={rep} died w/o .done — requeueing", flush=True)
+                del running[name]
+                pending.append(T)
     print(f"=== rep {rep} BARRIER reached (all T done) ===", flush=True)
     pull_runpod_results(ablation)
 
