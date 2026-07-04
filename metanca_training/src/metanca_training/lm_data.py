@@ -29,7 +29,7 @@ def collate_chunks(chunks, sps: dict[int, Any], context: int, pad_ids: dict[int,
         M = np.zeros((len(chunks), context, 1), dtype=bool)
         for i, c in enumerate(chunks):
             ids = sp.encode(c)
-            x, y = ids[:-1][:context], ids[1:][:context + 1][:context]
+            x, y = ids[:-1][:context], ids[1:][:context]
             n = min(len(x), len(y))
             X[i, :n] = x[:n]; Y[i, :n] = y[:n]; M[i, :n, 0] = True
         out[v] = (X, Y, M)
@@ -47,6 +47,9 @@ def load_multi_vocab_shakespeare(data_dir: str, batch_size: int = 8, val_split: 
     cfg = json.loads((d / "chunking.json").read_text())
     context, vocabs = int(cfg["context_length"]), tuple(int(v) for v in cfg["vocabs"])
     text = (d / "input.txt").read_bytes().decode("utf-8")
+    # chunking slices by character offset while chunk_bytes is a byte count; only
+    # equivalent for pure-ASCII text (each char == 1 byte).
+    assert text.isascii(), "chunking assumes 1 byte == 1 char; recalibrate chunking.json for non-ASCII corpora"
     cb = int(cfg["chunk_bytes"])
     chunks = [text[i:i + cb] for i in range(0, len(text) - cb + 1, cb)]
     n_train = int(len(chunks) * (1.0 - val_split))
@@ -55,8 +58,13 @@ def load_multi_vocab_shakespeare(data_dir: str, batch_size: int = 8, val_split: 
     pad_ids = {v: sps[v].pad_id() for v in vocabs}
 
     train, val, factors = {}, {}, {}
-    for split_name, split_chunks, store in (("train", chunks[:n_train], train),
-                                            ("val", chunks[n_train:], val)):
+    for split_name, all_split_chunks, store in (("train", chunks[:n_train], train),
+                                                ("val", chunks[n_train:], val)):
+        # Truncate to the batch-aligned population BEFORE collating, so the collate,
+        # the batchified arrays, and the factor numerator/denominator all cover
+        # exactly the same chunks (_batchify drops the ragged tail otherwise).
+        n_aligned = (len(all_split_chunks) // batch_size) * batch_size
+        split_chunks = all_split_chunks[:n_aligned]
         col = collate_chunks(split_chunks, sps, context, pad_ids)
         n_bytes = sum(len(c.encode("utf-8")) for c in split_chunks)
         for v, (X, Y, M) in col.items():

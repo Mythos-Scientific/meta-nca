@@ -14,7 +14,7 @@ def test_collate_shapes_and_alignment():
     assert X.shape == (2, 8) and Y.shape == (2, 8) and M.shape == (2, 8, 1)
     ids = FakeSP().encode("hello world")
     assert list(X[0]) == ids[:-1][:8]           # inputs = ids[:-1], truncated
-    assert list(Y[0]) == ids[1:][:9][:8]        # targets = ids[1:]
+    assert list(Y[0]) == ids[1:][:8]            # targets = ids[1:]
     n_valid = len(FakeSP().encode("hi")) - 1    # "hi" -> 2 ids -> 1 scored position
     assert M[1, :, 0].sum() == n_valid
     assert (X[1, n_valid:] == 251).all()        # padded with pad_id
