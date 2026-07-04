@@ -6,7 +6,7 @@ from metanca_training.scaling.llm_grid import (
 
 def test_grid_size_and_validity():
     grid = build_llm_grid()
-    assert len(grid) == 68 and len(set(grid)) == 68
+    assert len(grid) == 51 and len(set(grid)) == 51
     for a in grid:
         hd = a.d_model // a.num_heads
         assert a.d_model % a.num_heads == 0 and 8 <= hd <= 64
@@ -21,7 +21,7 @@ def test_combo_count_per_dmodel():
 
 def test_split_and_sample_deterministic():
     pool, val = split_llm_grid(seed=7)
-    assert len(val) == N_VAL_LLM and len(pool) == 54
+    assert len(val) == N_VAL_LLM and len(pool) == 41
     assert set(pool).isdisjoint(val) and set(pool) | set(val) == set(build_llm_grid())
     assert split_llm_grid(seed=7) == (pool, val)
     sub = sample_llm_subset(pool, 8, seed=3)

@@ -24,7 +24,7 @@ CONFIG_DIR = str((Path(__file__).parents[2] / "configs").resolve())
 logger = logging.getLogger(__name__)
 
 SPLIT_SEED = 20260701  # fixed: the held-out V is identical across all T and reps
-LARGEST_LLM_ARCH = LLMArch(256, 4, 4096)  # spans the grid; used to provision the shared initializer
+LARGEST_LLM_ARCH = LLMArch(256, 4, 1024)  # spans the grid; used to provision the shared initializer
 
 
 def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int):

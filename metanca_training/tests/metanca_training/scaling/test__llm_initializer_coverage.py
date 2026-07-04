@@ -1,5 +1,5 @@
 """The shared hidden-state initializer is provisioned by probing the LARGEST LLM
-arch in the grid (LLMArch(256, 4, 4096)); this asserts it also covers building
+arch in the grid (LLMArch(256, 4, 1024)); this asserts it also covers building
 tasknets for the grid's extreme corners without error (may take a few CPU-minutes:
 building/tracing the largest arch's TaskNet is the real coverage guarantee, so its
 dims are kept as-is rather than shrunk for speed)."""
@@ -27,7 +27,7 @@ def test_grid_max_initializer_covers_extreme_archs():
     key = jax.random.key(0)
     probe_key, build_key_a, build_key_b = jax.random.split(key, 3)
 
-    largest = LLMArch(256, 4, 4096)
+    largest = LLMArch(256, 4, 1024)
     probe_tasknet = metanca.TaskNet.build(
         model=build_tiny_lm(largest, CTX),
         input_shape=(CTX,),
@@ -40,7 +40,7 @@ def test_grid_max_initializer_covers_extreme_archs():
     )
     shared = (probe_tasknet.hidden_state_initializer, probe_tasknet.hidden_dim)
 
-    for arch, bkey in ((LLMArch(32, 2, 512), build_key_a), (LLMArch(256, 8, 4096), build_key_b)):
+    for arch, bkey in ((LLMArch(32, 2, 258), build_key_a), (LLMArch(256, 8, 1024), build_key_b)):
         tasknet = metanca.TaskNet.build(
             model=build_tiny_lm(arch, CTX),
             input_shape=(CTX,),

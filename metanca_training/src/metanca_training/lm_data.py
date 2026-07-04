@@ -12,6 +12,21 @@ from typing import Any, NamedTuple
 import numpy as np
 
 
+BYTE_VOCAB = 258  # byte-level "tokenizer": 0-255 raw bytes, 256 eos, 257 pad
+
+
+class _ByteTokenizer:
+    """Byte-level tokenizer (monorepo byte_tokenize_text convention): ids 0-255 are raw
+    bytes, 256 = eos (unused by our chunk windowing), 257 = pad. Duck-types the subset of
+    the SentencePiece API the collate pipeline uses."""
+
+    def encode(self, s: str) -> list[int]:
+        return list(s.encode("utf-8"))
+
+    def pad_id(self) -> int:
+        return 257
+
+
 class MultiVocabLM(NamedTuple):
     train: dict[int, tuple]
     val: dict[int, tuple]
@@ -53,7 +68,8 @@ def load_multi_vocab_shakespeare(data_dir: str, batch_size: int = 8, val_split: 
     cb = int(cfg["chunk_bytes"])
     chunks = [text[i:i + cb] for i in range(0, len(text) - cb + 1, cb)]
     n_train = int(len(chunks) * (1.0 - val_split))
-    sps = {v: spm.SentencePieceProcessor(model_file=str(d / f"shakespeare_{v}_bpe.model"))
+    sps = {v: (_ByteTokenizer() if v == BYTE_VOCAB else
+               spm.SentencePieceProcessor(model_file=str(d / f"shakespeare_{v}_bpe.model")))
            for v in vocabs}
     pad_ids = {v: sps[v].pad_id() for v in vocabs}
 

@@ -7,10 +7,10 @@ from .arch_grid import _shuffled
 
 D_MODELS: tuple[int, ...] = (32, 48, 64, 96, 128, 192, 256)
 HEADS: tuple[int, ...] = (2, 4, 8)
-VOCABS: tuple[int, ...] = (512, 1024, 2048, 4096)
+VOCABS: tuple[int, ...] = (258, 512, 1024)  # 258 = byte-level (0-255 bytes, 256 eos, 257 pad)
 HEAD_DIM_RANGE: tuple[int, int] = (8, 64)
 NUM_LAYERS: int = 3
-N_VAL_LLM: int = 14
+N_VAL_LLM: int = 10  # ~20% of the 51-arch grid
 
 
 class LLMArch(NamedTuple):

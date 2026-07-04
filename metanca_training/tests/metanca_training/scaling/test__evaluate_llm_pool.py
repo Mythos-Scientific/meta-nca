@@ -36,7 +36,7 @@ def test_evaluate_llm_pool_rows():
     train_arch = LLMArch(32, 2, 512)
     val_arch = LLMArch(48, 2, 1024)
 
-    # Too slow to probe the real grid-max LLMArch(256, 4, 4096) in a test; probing this
+    # Too slow to probe the real grid-max LLMArch(256, 4, 1024) in a test; probing this
     # test's own (larger) val arch is a sufficient shared initializer for these two archs.
     probe_key, key = jax.random.split(key)
     import metanca
