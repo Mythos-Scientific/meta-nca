@@ -51,3 +51,13 @@ def test_aggregate_bpb(tmp_path):
     assert set(agg) == {1, 5}
     assert agg[1]["val"] == [1.5]
     assert agg[5]["train"] == [1.1]
+
+
+def test_plot_boxplots_bpb_with_adam(tmp_path):
+    from metanca_training.scaling.plotting import plot_boxplots
+    rows = load_results(_write_bpb(tmp_path))
+    agg = aggregate(rows, "bpb")
+    out = tmp_path / "b.png"
+    adam = {"llm_d32_h2_v512": {"val_loss": 1.0, "val_ppl": 2.7, "val_bpb": 1.4}}
+    plot_boxplots(agg, "bpb", out, adam=adam)
+    assert out.exists() and out.stat().st_size > 0

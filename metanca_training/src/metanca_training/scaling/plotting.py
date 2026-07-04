@@ -15,6 +15,12 @@ _MEAN_KEY = {
     "bpb": "val_bpb_mean",
     "ppl": "val_ppl_mean",
 }
+_ADAM_KEY = {
+    "loss": "val_loss",
+    "acc": "val_acc",
+    "bpb": "val_bpb",
+    "ppl": "val_ppl",
+}
 _LABEL = {
     "loss": "validation loss",
     "acc": "validation accuracy",
@@ -51,7 +57,7 @@ def plot_boxplots(agg, metric, out_path, adam: dict | None = None) -> None:
         ax.set_title(f"{title} — {_LABEL[metric]}")
         ax.set_xlabel("T (number of training architectures)")
         if adam is not None:
-            vals = [adam[k]["val_loss" if metric == "loss" else "val_acc"] for k in adam]
+            vals = [adam[k][_ADAM_KEY[metric]] for k in adam]
             ax.axhline(float(np.median(vals)), ls="--", color="tab:red",
                        label="Adam median")
             ax.legend()
