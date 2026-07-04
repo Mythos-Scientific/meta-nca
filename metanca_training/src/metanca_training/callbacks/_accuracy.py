@@ -48,6 +48,13 @@ class AccuracyCallback:
     returns it in the logs. It requires the TrainingContext to have
     tasknet_data_list, apply_fns, batch_x, and batch_y populated.
 
+    When `ctx.per_arch_batches` is populated (dict-mode / mixed-vocab LLM
+    pools), each tasknet is scored on ITS OWN (x, y, mask) batch instead of
+    the single shared `batch_x`/`batch_y`/`mask` — otherwise every arch would
+    be scored on arch 0's batch, contaminating the "accuracy" metric used to
+    rank/retain checkpoints. When `ctx.per_arch_batches` is None (tuple-mode,
+    validation), behavior is identical to before this field existed.
+
     This is a stateless callback - it doesn't track any state across
     batches, just computes metrics.
     """
@@ -57,12 +64,16 @@ class AccuracyCallback:
         if ctx.tasknet_data_list is None or ctx.apply_fns is None:
             return self, EMPTY_RESULT
 
-        if ctx.batch_x is None or ctx.batch_y is None:
+        if ctx.per_arch_batches is None and (ctx.batch_x is None or ctx.batch_y is None):
             return self, EMPTY_RESULT
 
         accuracies = jnp.zeros(len(ctx.tasknet_data_list))
         for i, ((params, _, _), apply_fn) in enumerate(zip(ctx.tasknet_data_list, ctx.apply_fns)):
-            acc = compute_accuracy(ctx.batch_x, ctx.batch_y, ctx.mask, params, apply_fn)
+            if ctx.per_arch_batches is not None:
+                x_i, y_i, mask_i = ctx.per_arch_batches[i]
+            else:
+                x_i, y_i, mask_i = ctx.batch_x, ctx.batch_y, ctx.mask
+            acc = compute_accuracy(x_i, y_i, mask_i, params, apply_fn)
             accuracies = accuracies.at[i].set(acc)
 
         mean_accuracy = accuracies.mean()

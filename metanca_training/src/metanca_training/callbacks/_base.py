@@ -58,9 +58,17 @@ class TrainingContext:
         optimizer_state: Current optimizer state.
         tasknet_data_list: List of (params, hidden_states, positional_encodings) tuples.
         apply_fns: Sequence of tasknet apply functions.
-        batch_x: Current batch input data.
-        batch_y: Current batch target data.
-        mask: Current batch mask.
+        batch_x: Current batch input data (shared across all tasknets).
+        batch_y: Current batch target data (shared across all tasknets).
+        mask: Current batch mask (shared across all tasknets).
+        per_arch_batches: Optional per-tasknet batches, aligned 1:1 with
+            `tasknet_data_list`/`apply_fns`, as a sequence of (x, y, mask)
+            tuples. Used by dict-mode (mixed-vocab LLM pools) where each
+            arch trains on its own token stream and must be scored on that
+            SAME stream rather than on a single shared representative batch.
+            When None (the default — tuple-mode and validation), callbacks
+            fall back to the shared `batch_x`/`batch_y`/`mask` fields with
+            behavior identical to before this field existed.
     """
 
     metaepoch: int = 0
@@ -74,6 +82,7 @@ class TrainingContext:
     batch_x: jax.Array | None = None
     batch_y: jax.Array | None = None
     mask: jax.Array | None = None
+    per_arch_batches: Sequence[tuple[jax.Array, jax.Array, jax.Array]] | None = None
 
     def with_updated(self, **kwargs) -> "TrainingContext":
         """Return a new TrainingContext with updated fields."""
@@ -89,6 +98,7 @@ class TrainingContext:
             batch_x=kwargs.get("batch_x", self.batch_x),
             batch_y=kwargs.get("batch_y", self.batch_y),
             mask=kwargs.get("mask", self.mask),
+            per_arch_batches=kwargs.get("per_arch_batches", self.per_arch_batches),
         )
 
 

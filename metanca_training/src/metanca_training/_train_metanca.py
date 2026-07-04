@@ -44,6 +44,19 @@ def _n_spatial_dims(input_shape: tuple[int, ...]) -> int:
     return len(input_shape) - 1
 
 
+def _infer_dummy_input_dtype(dtype: jnp.dtype) -> jnp.dtype:
+    """Infer the dtype for the dummy input used to trace/build tasknets.
+
+    uint8 image batches are promoted to float32 before the model ever sees
+    them (see `_maybe_promote_image_batch`), so despite uint8 being an
+    unsigned integer dtype, it must map to a float32 dummy here too — an
+    int32 dummy would insert a spurious `convert_element_type` node into the
+    traced compute graph that never occurs in the real forward pass.
+    """
+    is_non_uint8_integer = jnp.issubdtype(dtype, jnp.integer) and dtype != jnp.uint8
+    return jnp.int32 if is_non_uint8_integer else jnp.float32
+
+
 def _maybe_promote_image_batch(x: jax.Array) -> jax.Array:
     """Apply `promote_image_batch` only to uint8/float image batches.
 
@@ -210,9 +223,7 @@ def train_metanca(
         raise ValueError("arch_keys is required when train_batches/val_batches are dicts")
 
     sample_x = train_batches[arch_keys[0]][0] if dict_mode else train_batches[0]
-    dummy_input_dtype = (
-        jnp.int32 if jnp.issubdtype(sample_x.dtype, jnp.integer) else jnp.float32
-    )
+    dummy_input_dtype = _infer_dummy_input_dtype(sample_x.dtype)
 
     training_vars = before_metanca_training(
         cfg,
@@ -454,12 +465,18 @@ def train_metanca(
                     )
 
             t_callback_start = time.time()
+            # In dict-mode, each arch trained on ITS OWN vocab's batch (`batches`
+            # is per-arch); score in-loop accuracy per-arch on those same batches
+            # rather than on arch 0's batch alone, so checkpoint-ranking metrics
+            # aren't contaminated. In tuple-mode `batches` is the same shared
+            # batch repeated per-arch, so passing it through is a no-op change.
             ctx = ctx.with_updated(
                 batch_idx=batch_idx,
                 tasknet_data_list=new_tasknet_data,
                 batch_x=batch_x,
                 batch_y=batch_y,
                 mask=mask,
+                per_arch_batches=batches if dict_mode else None,
             )
             callback_runner, batch_result = callback_runner.on_batch_end(ctx)
             t_after_callback = time.time()

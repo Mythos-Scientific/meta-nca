@@ -6,9 +6,21 @@ from hydra import compose, initialize_config_dir
 
 from metanca_training import train_metanca
 from metanca_training._hydra_configs import register_configs
+from metanca_training._train_metanca import _infer_dummy_input_dtype
 from metanca_training.scaling.llm_grid import LLMArch, build_tiny_lm
 
 CONFIG_DIR = str((Path(__file__).parents[2] / "configs").resolve())
+
+
+def test_infer_dummy_input_dtype():
+    """uint8 image batches get promoted to float32 before the model sees them
+    (see `_maybe_promote_image_batch`), so the tracing dummy must be float32
+    too — an int32 dummy would insert a spurious convert_element_type node
+    into the traced compute graph. Non-uint8 integer dtypes (token ids) map
+    to int32; floats stay float32."""
+    assert _infer_dummy_input_dtype(jnp.uint8) == jnp.float32
+    assert _infer_dummy_input_dtype(jnp.int32) == jnp.int32
+    assert _infer_dummy_input_dtype(jnp.float32) == jnp.float32
 
 
 def _fake_lm_batches(vocab, n_batches=2, bs=2, ctx=16, seed=0):
