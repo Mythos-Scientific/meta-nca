@@ -9,8 +9,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-_MEAN_KEY = {"loss": "val_loss_mean", "acc": "val_acc_mean"}
-_LABEL = {"loss": "validation loss", "acc": "validation accuracy"}
+_MEAN_KEY = {
+    "loss": "val_loss_mean",
+    "acc": "val_acc_mean",
+    "bpb": "val_bpb_mean",
+    "ppl": "val_ppl_mean",
+}
+_LABEL = {
+    "loss": "validation loss",
+    "acc": "validation accuracy",
+    "bpb": "validation bits/byte",
+    "ppl": "validation perplexity",
+}
 
 
 def load_results(path) -> list[dict]:

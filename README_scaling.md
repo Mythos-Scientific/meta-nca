@@ -77,3 +77,26 @@ validation data**. Across runs, aggregates mix slightly different 14k-sample spl
 (±~0.3% accuracy noise per run; ~±0.15% after 3 reps). The Adam baseline table used the
 `key(0)` split, so per-arch MetaNCA-vs-Adam comparisons carry ~±0.3–0.4% cross-split noise.
 Decision: accepted (effects of interest are 10–50×), kept uniform rather than mixing regimes.
+
+## LLM study (llm-scaling branch)
+
+Run order:
+1. **Tokenizers:** Already committed to the branch.
+2. **Probe:** Run on a free GPU to assess memory and timing:
+   ```bash
+   metanca_training/scripts/scaling/llm_probe.py
+   ```
+   Record per-metaepoch time and projected hours, peak device memory.
+3. **Gate:** Budget sign-off on probe numbers (HARD GATE before proceeding to runs).
+4. **Runs:** Execute scaling runs via scheduler, pointing launch command at `run_llm_scaling.py`:
+   ```bash
+   run_llm_scaling.py --T n --rep k
+   ```
+   Adam baselines (sharded):
+   ```bash
+   run_llm_adam_baselines.py
+   ```
+5. **Plots:** Render loss, bits/byte (bpb), and perplexity (ppl) figures:
+   ```bash
+   plot_scaling.py --results-dir results/scaling/llm --metrics loss,bpb,ppl --tag llm
+   ```

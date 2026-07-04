@@ -31,3 +31,23 @@ def test_plot_writes_png(tmp_path):
     out = tmp_path / "box.png"
     plot_boxplots(agg, "acc", out)
     assert out.exists() and out.stat().st_size > 0
+
+
+def _write_bpb(tmp_path):
+    rows = [
+        {"T": 1, "rep": 0, "split": "train", "val_bpb_mean": 1.2},
+        {"T": 1, "rep": 0, "split": "val", "val_bpb_mean": 1.5},
+        {"T": 5, "rep": 0, "split": "train", "val_bpb_mean": 1.1},
+        {"T": 5, "rep": 0, "split": "val", "val_bpb_mean": 1.3},
+    ]
+    p = tmp_path / "bpb.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return p
+
+
+def test_aggregate_bpb(tmp_path):
+    rows = load_results(_write_bpb(tmp_path))
+    agg = aggregate(rows, "bpb")
+    assert set(agg) == {1, 5}
+    assert agg[1]["val"] == [1.5]
+    assert agg[5]["train"] == [1.1]
