@@ -14,17 +14,25 @@ def _classify_elementwise(
     """Classify how a non-barrier elementwise op pairs the two parameter shapes.
 
     Returns one of:
-        - ``"equal_shape"``: focus and neighbor are pointwise paired (e.g. two
-          parameters of identical shape sharing the same op).
+        - ``"equal_shape"``: two 1-D parameters of identical shape pointwise
+          paired (e.g. two bias/scale vectors sharing the same op).
         - ``"broadcast_vector"``: a 1-D neighbor (e.g. bias) broadcasts onto the
           focus's last axis (e.g. Dense kernel + bias).
         - ``"shared_trailing_channel"``: both ranks >= 2 and the trailing axis
           has the same size — typical of two transformer-style weights writing
           into the same residual channel (e.g. ``embedding[V,D]`` and
           ``out_proj[D,D]`` both write to channel D).
+
+    Note: rank >= 2 pairs are classified ``shared_trailing_channel`` even when
+    their full shapes coincide. Elementwise edges between two matrices arise
+    from residual-stream adds of their *activations*, which share only the
+    trailing channel — a full-shape match is a size coincidence (e.g. a
+    TinyCausalLM where ``mlp_dim == vocab_size`` makes ``mlp_out[M,D]`` equal
+    in shape to ``embedding[V,D]``), and treating it as a pointwise pairing
+    slices the neighbor along the wrong axis.
     """
     focus_rank, neighbor_rank = map(len, (focus_shape, neighbor_shape))
-    if focus_rank == neighbor_rank and focus_shape == neighbor_shape:
+    if focus_rank == neighbor_rank == 1 and focus_shape == neighbor_shape:
         return "equal_shape"
     if neighbor_rank == 1 and focus_rank != 1 and focus_shape[-1] == neighbor_shape[0]:
         return "broadcast_vector"
