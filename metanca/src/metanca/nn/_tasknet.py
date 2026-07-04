@@ -1,7 +1,7 @@
 import functools
 import logging
 from dataclasses import asdict, dataclass, field
-from typing import Iterable, Literal, Optional, Sequence
+from typing import Any, Iterable, Literal, Optional, Sequence
 
 import chex
 import flax.linen as nn
@@ -45,6 +45,14 @@ def _fix_conv_dense_boundary_pe(
     for i in range(len(layer_names) - 1):
         curr_kernel_name = f"{layer_names[i]}.kernel"
         next_kernel_name = f"{layer_names[i + 1]}.kernel"
+
+        # Layers without a ``.kernel`` (LM embeddings, RMSNorm scales, etc.) can
+        # never form a Conv->Dense boundary; skip them silently.
+        if not (
+            mfx.nested_contains(curr_kernel_name, layer_shapes)
+            and mfx.nested_contains(next_kernel_name, layer_shapes)
+        ):
+            continue
 
         curr_shape = mfx.nested_get(curr_kernel_name, layer_shapes)
         next_shape = mfx.nested_get(next_kernel_name, layer_shapes)
@@ -102,6 +110,7 @@ def _fix_conv_dense_boundary_pe(
         "n_spatial_dims",
         "d_spatial",
         "d_neuron",
+        "dummy_input_dtype",
     ],
 )
 @dataclass(frozen=True)
@@ -118,31 +127,44 @@ class TaskNet:
     n_spatial_dims: int = field(metadata=static_metadata)
     d_spatial: int = field(metadata=static_metadata)
     d_neuron: int = field(metadata=static_metadata)
+    dummy_input_dtype: Any = field(default=jnp.float32, metadata=static_metadata)
 
     def reset(self, rand_key: jax.random.PRNGKey) -> "TaskNet":
         model = self.model
 
-        dummy_input = jnp.zeros((1, *self.input_shape))
+        dummy_input = jnp.zeros((1, *self.input_shape), dtype=self.dummy_input_dtype)
         params = model.init(rand_key, dummy_input)
 
         hidden_state_dict = {}
         positional_encoding_dict = {}
         layer_shapes = jax.tree.map(lambda x: x.shape, params)
 
+        primary_param_priority = ("kernel", "embedding", "scale", "bias")
         for layer_idx, layer in enumerate(self.layer_names):
-            layer_shape = mfx.nested_get(f"{layer}.kernel", layer_shapes)
-            biased = mfx.nested_contains(f"{layer}.bias", layer_shapes)
-            layer_states = list(
-                filter(
-                    lambda x: x is not None,
-                    self.hidden_state_initializer(layer_shape, layer_idx, bias=biased),
-                )
+            layer_param_dict = mfx.nested_get(layer, layer_shapes)
+            available_param_roles = tuple(layer_param_dict.keys())
+            primary_role = next(
+                (r for r in primary_param_priority if r in available_param_roles),
+                available_param_roles[0],
             )
-            for state, param_name in zip(layer_states, ("kernel", "bias")):
-                mfx.nested_set(f"{layer}.{param_name}", state, hidden_state_dict, delimiter=".")
-                mfx.nested_set(
-                    f"{layer}.{param_name}", state, positional_encoding_dict, delimiter="."
-                )
+            primary_shape = layer_param_dict[primary_role]
+            biased = "bias" in available_param_roles
+
+            kernel_state, bias_state = self.hidden_state_initializer(
+                primary_shape, layer_idx, bias=biased
+            )
+
+            for role in available_param_roles:
+                if role == "bias" and bias_state is not None:
+                    state = bias_state
+                elif role == primary_role:
+                    state = kernel_state
+                else:
+                    state, _ = self.hidden_state_initializer(
+                        layer_param_dict[role], layer_idx, bias=False
+                    )
+                mfx.nested_set(f"{layer}.{role}", state, hidden_state_dict, delimiter=".")
+                mfx.nested_set(f"{layer}.{role}", state, positional_encoding_dict, delimiter=".")
 
         _fix_conv_dense_boundary_pe(
             layer_names=self.layer_names,
@@ -181,6 +203,7 @@ class TaskNet:
         d_spatial: int = 2,
         d_layer: int = 2,
         shared_initializer: Optional[tuple[mhx.HiddenStateInitializer, int]] = None,
+        dummy_input_dtype: jnp.dtype = jnp.float32,
     ) -> "TaskNet":
         """Build a TaskNet from an architecture specification.
 
@@ -198,21 +221,33 @@ class TaskNet:
             shared_initializer: Optional tuple of (initializer_fn, hidden_dim) to use
                 instead of creating a new one. Used by build_many to ensure all
                 TaskNets share the same initializer.
+            dummy_input_dtype: dtype of the probe tensor used to run ``model.init``.
+                Image models accept the float32 default; token-id models (e.g.
+                ``TinyCausalLM``) need an integer dtype like ``jnp.int32``.
 
         Returns:
             A new TaskNet instance.
         """
-        dummy_input = jnp.zeros((1, *input_shape))
+        dummy_input = jnp.zeros((1, *input_shape), dtype=dummy_input_dtype)
         params = model.init(key, dummy_input)
 
         def forward_fn(*args):
             return model.apply(params, *args)
 
-        jaxpr = jax.make_jaxpr(forward_fn)(dummy_input).jaxpr
+        closed = jax.make_jaxpr(forward_fn)(dummy_input)
+        jaxpr = closed.jaxpr
         compute_graph = mnx.build_compute_graph(jaxpr)
         flattened = mfx.flatten_params(params)
+        # Models that do work like ``jnp.arange(seq_len)`` inside ``apply`` capture
+        # extra non-parameter constants alongside the closed-over params. Identity-
+        # match constvars against the flattened-param arrays via ``closed.literals``
+        # so we keep only the real parameters and don't mis-pair names with vars.
+        param_id_to_name = {id(param): name for name, param in flattened}
+        param_id_to_value = {id(param): param for _, param in flattened}
         names_vars_and_params = [
-            (name, var, param) for var, (name, param) in zip(jaxpr.constvars, flattened)
+            (param_id_to_name[id(lit)], var, param_id_to_value[id(lit)])
+            for var, lit in zip(jaxpr.constvars, closed.literals)
+            if id(lit) in param_id_to_name
         ]
 
         fwd, bwd = mnx.build_parameter_neighbor_graphs(
@@ -224,7 +259,7 @@ class TaskNet:
             fwd,
             names_vars_and_params,
         )
-        bwd_neighbor_data = mnx.convert_parameter_graph(
+        bwd_neighbor_data = mnx.convert_parameter_graph_backward(
             bwd,
             names_vars_and_params,
         )
@@ -256,20 +291,37 @@ class TaskNet:
         hidden_state_dict = {}
         positional_encoding_dict = {}
 
+        # Pick the primary param of each layer to drive the hidden-state shape.
+        # Order matches Flax conventions across image/text models.
+        primary_param_priority = ("kernel", "embedding", "scale", "bias")
+
         for layer_idx, layer in enumerate(layer_names):
-            layer_shape = mfx.nested_get(f"{layer}.kernel", layer_shapes)
-            biased = mfx.nested_contains(f"{layer}.bias", layer_shapes)
-            layer_states = list(
-                filter(
-                    lambda x: x is not None,
-                    hidden_initializer_with_bias(layer_shape, layer_idx, bias=biased),
-                )
+            layer_param_dict = mfx.nested_get(layer, layer_shapes)
+            available_param_roles = tuple(layer_param_dict.keys())
+            primary_role = next(
+                (r for r in primary_param_priority if r in available_param_roles),
+                available_param_roles[0],
             )
-            for state, param_name in zip(layer_states, ("kernel", "bias")):
-                mfx.nested_set(f"{layer}.{param_name}", state, hidden_state_dict, delimiter=".")
-                mfx.nested_set(
-                    f"{layer}.{param_name}", state, positional_encoding_dict, delimiter="."
-                )
+            primary_shape = layer_param_dict[primary_role]
+            biased = "bias" in available_param_roles
+
+            kernel_state, bias_state = hidden_initializer_with_bias(
+                primary_shape, layer_idx, bias=biased
+            )
+
+            for role in available_param_roles:
+                if role == "bias" and bias_state is not None:
+                    state = bias_state
+                elif role == primary_role:
+                    state = kernel_state
+                else:
+                    # Other params on this layer (e.g. a separate scale alongside a kernel)
+                    # get their own per-shape init.
+                    state, _ = hidden_initializer_with_bias(
+                        layer_param_dict[role], layer_idx, bias=False
+                    )
+                mfx.nested_set(f"{layer}.{role}", state, hidden_state_dict, delimiter=".")
+                mfx.nested_set(f"{layer}.{role}", state, positional_encoding_dict, delimiter=".")
 
         _fix_conv_dense_boundary_pe(
             layer_names=layer_names,
@@ -296,6 +348,7 @@ class TaskNet:
             n_spatial_dims=n_spatial_dims,
             d_spatial=d_spatial,
             d_neuron=d_neuron,
+            dummy_input_dtype=dummy_input_dtype,
         )
 
     @classmethod
@@ -308,6 +361,7 @@ class TaskNet:
         d_layer: int = 2,
         d_spatial: int = 2,
         shared_initializer: Optional[tuple[mhx.HiddenStateInitializer, int]] = None,
+        dummy_input_dtype: jnp.dtype = jnp.float32,
     ) -> list["TaskNet"]:
         """Build multiple TaskNets with a shared hidden state initializer.
 
@@ -340,7 +394,7 @@ class TaskNet:
             probe_keys = jax.random.split(probe_key, len(models))
 
             for model, input_shape, probe_key in zip(models, input_shapes, probe_keys):
-                dummy_input = jnp.zeros((1, *input_shape))
+                dummy_input = jnp.zeros((1, *input_shape), dtype=dummy_input_dtype)
                 params = model.init(probe_key, dummy_input)
                 flattened = mfx.flatten_params(params)
                 layer_shapes = jax.tree.map(lambda x: x.shape, params)
@@ -386,6 +440,7 @@ class TaskNet:
             d_spatial=d_spatial,
             d_layer=d_layer,
             shared_initializer=shared_initializer,
+            dummy_input_dtype=dummy_input_dtype,
         )
 
         return [
@@ -394,8 +449,10 @@ class TaskNet:
         ]
 
     def iter_param_names(self) -> Iterable[str]:
+        # Include all Flax param roles we recognise, not just kernel/bias —
+        # otherwise embedding/scale params get silently dropped from updates.
         for layer_name in self.layer_names:
-            for param_type in ("bias", "kernel"):
+            for param_type in ("bias", "kernel", "embedding", "scale"):
                 param_name = f"{layer_name}.{param_type}"
                 if mfx.nested_contains(param_name, self.params):
                     yield param_name
