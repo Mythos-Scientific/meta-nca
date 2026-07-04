@@ -27,7 +27,7 @@ import jax.numpy as jnp
 import wandb
 
 sys.path.insert(0, str(Path(__file__).parent))
-from run_llm_scaling import LARGEST_LLM_ARCH, build_cfg  # noqa: E402 (same directory)
+from run_llm_scaling import LARGEST_LLM_ARCH, SPLIT_SEED, build_cfg  # noqa: E402 (same directory)
 
 import metanca  # noqa: E402
 from metanca_training._train_metanca import before_metanca_training  # noqa: E402
@@ -69,8 +69,13 @@ def _train_step_call(*, batches, local_rule_net_apply, local_rule_params, rand_k
     )
 
 
-def time_corner(arch: LLMArch, ctx: int, cfg, key: jax.Array) -> dict:
-    """TaskNet build time + single-arch train-step compile/steady at n in {1, 10}."""
+def time_corner(arch: LLMArch, ctx: int, cfg, key: jax.Array, shared_initializer) -> dict:
+    """TaskNet build time + single-arch train-step compile/steady at n in {1, 10}.
+
+    `shared_initializer` is the grid-max initializer probed from LARGEST_LLM_ARCH in main(),
+    forced onto every corner arch so timings reflect production's grid-max hidden_dim rather
+    than each corner's arch-native hidden_dim.
+    """
     model = build_tiny_lm(arch, ctx)
 
     key, bk = jax.random.split(key)
@@ -84,10 +89,11 @@ def time_corner(arch: LLMArch, ctx: int, cfg, key: jax.Array) -> dict:
     ))
     build_s = time.time() - t0
 
+    cfg.checkpoint.run_name = f"llm_probe_corner_d{arch.d_model}"
     key, tk = jax.random.split(key)
     tvars = before_metanca_training(
         cfg, models=[model], test_model=model, rand_key=tk,
-        shared_initializer=None, dummy_input_dtype=jnp.int32,
+        shared_initializer=shared_initializer, dummy_input_dtype=jnp.int32,
     )
     tasknet = tvars.tasknets[0]
     adjs = (tasknet.adj,)
@@ -136,26 +142,22 @@ def time_corner(arch: LLMArch, ctx: int, cfg, key: jax.Array) -> dict:
     return results
 
 
-def time_pool(cfg, ctx: int, mvlm, t8_batches: int, key: jax.Array) -> dict:
-    """T=8 mixed-vocab pool: dict-mode train-step compile/steady at n in {1, 10}."""
-    pool, val_archs = split_llm_grid(20260701)
+def time_pool(cfg, ctx: int, mvlm, t8_batches: int, key: jax.Array, shared_initializer) -> dict:
+    """T=8 mixed-vocab pool: dict-mode train-step compile/steady at n in {1, 10}.
+
+    `shared_initializer` is the same grid-max initializer used for the corners (probed once
+    from LARGEST_LLM_ARCH in main()), matching production's shared-initializer convention.
+    """
+    pool, val_archs = split_llm_grid(SPLIT_SEED)
     train_archs = sample_llm_subset(pool, 8, seed=T8_SEED)
     models = [build_tiny_lm(a, ctx) for a in train_archs]
     test_model = build_tiny_lm(val_archs[0], ctx)
 
-    key, pk = jax.random.split(key)
-    probe_tasknet = metanca.TaskNet.build(
-        model=build_tiny_lm(LARGEST_LLM_ARCH, ctx), input_shape=(ctx,), key=pk,
-        n_spatial_dims=0, d_neuron=cfg.positional_encoding.d_neuron,
-        d_spatial=cfg.positional_encoding.d_spatial, d_layer=cfg.positional_encoding.d_layer,
-        dummy_input_dtype=jnp.int32,
-    )
-    shared_init = (probe_tasknet.hidden_state_initializer, probe_tasknet.hidden_dim)
-
+    cfg.checkpoint.run_name = "llm_probe_pool"
     key, tk = jax.random.split(key)
     tvars = before_metanca_training(
         cfg, models=models, test_model=test_model, rand_key=tk,
-        shared_initializer=shared_init, dummy_input_dtype=jnp.int32,
+        shared_initializer=shared_initializer, dummy_input_dtype=jnp.int32,
     )
     tasknets = tvars.tasknets
     adjs = tuple(t.adj for t in tasknets)
@@ -226,7 +228,7 @@ def _interp_per_batch(n: int, steady1: float, steady10: float) -> float:
     return steady1 + (n - 1) / (10 - 1) * (steady10 - steady1)
 
 
-def project(corner_results: list[dict], pool_results: dict, n_batches: int,
+def project(corner_results: list[dict], pool_results: dict, n_batches: int, n_val_batches: int,
             metaepochs: int, rate: int, max_steps: int) -> None:
     logger.info("=== PROJECTIONS ===")
     per_arch_s1 = pool_results["n1_steady_s"] / 8
@@ -236,7 +238,20 @@ def project(corner_results: list[dict], pool_results: dict, n_batches: int,
                 pool_results["n10_steady_s"] * n_batches, n_batches)
 
     ns = simulate_n_update_steps(metaepochs, rate, max_steps)
-    eval_per_arch_s = mean(r["build_s"] + r["n10_steady_s"] for r in corner_results)
+    # eval_per_arch_s: build + n_init_samples=5 rollouts (a train-step at n=10 is used as an
+    # upper-bound proxy for one forward-only rollout -- conservative, since it also pays for
+    # the backward/meta-gradient pass) + 5 sweeps over all val batches (forward-only; each
+    # batch approximated as half of a 1-step train batch, since forward-only skips the
+    # backward pass). This is a CONSERVATIVE PROXY, not an exact measurement: it upper-bounds
+    # the rollout cost and roughly estimates the val-sweep cost.
+    logger.info(
+        "eval projection caveat: conservative proxy (train-step upper-bounds the rollout; "
+        "n1_steady_s/2 roughly approximates a forward-only val batch)"
+    )
+    eval_per_arch_s = mean(
+        r["build_s"] + 5 * r["n10_steady_s"] + 5 * n_val_batches * (r["n1_steady_s"] / 2)
+        for r in corner_results
+    )
 
     for T in T_GRID:
         s1_T, s10_T = per_arch_s1 * T, per_arch_s10 * T
@@ -268,15 +283,31 @@ def main() -> None:
     mvlm = load_multi_vocab_shakespeare(data_dir, batch_size=BATCH_SIZE)
     ctx = mvlm.context_length
     n_batches = int(mvlm.train[mvlm.vocabs[0]][0].shape[0])
-    logger.info("loaded shakespeare: ctx=%d vocabs=%s n_train_batches=%d", ctx, mvlm.vocabs, n_batches)
+    n_val_batches = int(mvlm.val[mvlm.vocabs[0]][0].shape[0])
+    logger.info("loaded shakespeare: ctx=%d vocabs=%s n_train_batches=%d n_val_batches=%d",
+                ctx, mvlm.vocabs, n_batches, n_val_batches)
 
     cfg = build_cfg("llm_probe", args.metaepochs, seed=0, context_length=ctx)
+
+    # Explicit grid-max hidden-state initializer, probed ONCE from LARGEST_LLM_ARCH and shared
+    # by every corner + the pool, matching production's shared-initializer convention (see
+    # run_llm_scaling.py / time_pool in memory_probe.py-style scripts): every arch is forced
+    # onto the grid-max hidden_dim, so corner timings reflect production, not each corner's
+    # arch-native hidden_dim.
+    key, pk = jax.random.split(key)
+    probe_tasknet = metanca.TaskNet.build(
+        model=build_tiny_lm(LARGEST_LLM_ARCH, ctx), input_shape=(ctx,), key=pk,
+        n_spatial_dims=0, d_neuron=cfg.positional_encoding.d_neuron,
+        d_spatial=cfg.positional_encoding.d_spatial, d_layer=cfg.positional_encoding.d_layer,
+        dummy_input_dtype=jnp.int32,
+    )
+    shared_init = (probe_tasknet.hidden_state_initializer, probe_tasknet.hidden_dim)
 
     logger.info("=== CORNERS ===")
     corner_results = []
     for arch in CORNER_ARCHS:
         key, ck = jax.random.split(key)
-        r = time_corner(arch, ctx, cfg, ck)
+        r = time_corner(arch, ctx, cfg, ck, shared_init)
         corner_results.append(r)
         logger.info(
             "%s: build=%.3fs | n=1 compile=%.3fs steady=%.4fs/batch | "
@@ -288,14 +319,14 @@ def main() -> None:
     if not args.skip_pool:
         logger.info("=== T=8 MIXED-VOCAB POOL ===")
         key, pk = jax.random.split(key)
-        pool_results = time_pool(cfg, ctx, mvlm, args.t8_batches, pk)
+        pool_results = time_pool(cfg, ctx, mvlm, args.t8_batches, pk, shared_init)
         logger.info(
             "T=8: n=1 compile=%.3fs steady=%.4fs/batch | n=10 compile=%.3fs steady=%.4fs/batch",
             pool_results["n1_compile_s"], pool_results["n1_steady_s"],
             pool_results["n10_compile_s"], pool_results["n10_steady_s"],
         )
         project(
-            corner_results, pool_results, n_batches, args.metaepochs,
+            corner_results, pool_results, n_batches, n_val_batches, args.metaepochs,
             rate=int(cfg.training.update_step_scheduler_rate),
             max_steps=int(cfg.training.update_step_scheduler_max_steps),
         )
