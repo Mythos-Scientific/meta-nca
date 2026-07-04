@@ -85,7 +85,7 @@ _jitted_run_local_rule = jax.jit(
 
 
 def calculate_metanca_gradients(
-    batch: tuple[jax.Array, jax.Array, jax.Array],
+    batches: Sequence[tuple[jax.Array, jax.Array, jax.Array]],
     local_rule_net_apply: Callable[..., jax.Array],
     local_rule_net_params: chex.ArrayTree,
     rand_key: chex.PRNGKey,
@@ -100,8 +100,16 @@ def calculate_metanca_gradients(
     grad_clip_norm: float = 1.0,
     n_spatial_dims: int = 2,
 ) -> tuple[chex.Scalar, chex.ArrayTree, list[tuple[chex.ArrayTree, chex.ArrayTree]]]:
+    """Accumulate local-rule gradients across all tasknets.
+
+    ``batches`` has one entry per tasknet (``batches[i]`` feeds tasknet ``i``),
+    allowing mixed-vocab arch pools to draw each arch's batch from its own
+    token stream. Classification callers pass the same batch repeated
+    ``len(tasknet_data_list)`` times.
+    """
+
     def _accumulate_metanca_gradients(
-        batch: tuple[jax.Array, jax.Array, jax.Array],
+        batches: Sequence[tuple[jax.Array, jax.Array, jax.Array]],
         local_rule_net_apply: Callable[..., jax.Array],
         local_rule_net_params: chex.ArrayTree,
         rand_key: chex.PRNGKey,
@@ -113,10 +121,17 @@ def calculate_metanca_gradients(
         tasknet_rand_keys = jax.random.split(rand_key, len(tasknet_data_list))
 
         iterator = zip(
-            tasknet_rand_keys, tasknet_data_list, adjs, tasknet_param_names, tasknet_apply_fns
+            tasknet_rand_keys,
+            tasknet_data_list,
+            adjs,
+            tasknet_param_names,
+            tasknet_apply_fns,
+            batches,
         )
         new_tasknet_data_list = []
-        for i, (rk, tasknet_data, adj, param_names, tasknet_apply_fn) in enumerate(iterator, 1):
+        for i, (rk, tasknet_data, adj, param_names, tasknet_apply_fn, batch) in enumerate(
+            iterator, 1
+        ):
             logger.debug(f"Accumulating model {i}/{len(tasknet_data_list)} grads")
             (model_loss, new_tasknet_data), (local_rule_grads,) = (
                 _run_local_rule_forward_compute_tasknet_loss(
@@ -147,7 +162,7 @@ def calculate_metanca_gradients(
         return accum_grads, accum_loss, new_tasknet_data_list
 
     accum_grads, accum_loss, new_tasknet_data_list = _accumulate_metanca_gradients(
-        batch, local_rule_net_apply, local_rule_net_params, rand_key
+        batches, local_rule_net_apply, local_rule_net_params, rand_key
     )
 
     return accum_loss, accum_grads, new_tasknet_data_list
@@ -162,7 +177,7 @@ def stage_data_to_devices(
 
 
 def calculate_metanca_gradients_multi_gpu(
-    batch: tuple[jax.Array, jax.Array, jax.Array],
+    batches: Sequence[tuple[jax.Array, jax.Array, jax.Array]],
     local_rule_net_apply: Callable[..., jax.Array],
     lr_params_per_device: list[chex.ArrayTree],
     rand_key: chex.PRNGKey,
@@ -200,7 +215,7 @@ def calculate_metanca_gradients_multi_gpu(
     )
     for i, (rk, tasknet_data, adj, param_names, tasknet_apply_fn) in enumerate(iterator):
         device = devices[i % len(devices)]
-        batch_dev = jax.device_put(batch, device)
+        batch_dev = jax.device_put(batches[i], device)
         rk_dev = jax.device_put(rk, device)
 
         result = _jitted_run_local_rule(

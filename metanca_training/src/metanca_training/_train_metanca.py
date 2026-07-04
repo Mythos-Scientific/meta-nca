@@ -44,6 +44,17 @@ def _n_spatial_dims(input_shape: tuple[int, ...]) -> int:
     return len(input_shape) - 1
 
 
+def _maybe_promote_image_batch(x: jax.Array) -> jax.Array:
+    """Apply `promote_image_batch` only to uint8/float image batches.
+
+    Integer token batches (LLM dict-mode) must pass through untouched —
+    promoting them to float would corrupt token ids.
+    """
+    if jnp.issubdtype(x.dtype, jnp.integer) and x.dtype != jnp.uint8:
+        return x
+    return promote_image_batch(x)
+
+
 def before_metanca_training(
     cfg: DictConfig,
     *,
@@ -51,6 +62,7 @@ def before_metanca_training(
     test_model: nn.Module,
     rand_key: chex.PRNGKey,
     shared_initializer: tuple | None = None,
+    dummy_input_dtype: jnp.dtype = jnp.float32,
 ) -> TrainingVars:
     input_shape = tuple(cfg.dataset.input_shape)
     n_spatial_dims = _n_spatial_dims(input_shape)
@@ -74,6 +86,7 @@ def before_metanca_training(
         d_layer=cfg.positional_encoding.d_layer,
         d_spatial=cfg.positional_encoding.d_spatial,
         shared_initializer=shared_initializer,
+        dummy_input_dtype=dummy_input_dtype,
     )
 
     # TODO: could configure this if we wanted.
@@ -170,23 +183,44 @@ def log_dict(
 
 
 def train_metanca(
-    train_batches: chex.Array,
-    val_batches: chex.Array,
+    train_batches: chex.Array | dict[object, tuple],
+    val_batches: chex.Array | dict[object, tuple],
     *,
     cfg: DictConfig,
     models: list[nn.Module],
     test_model: nn.Module,
     shared_initializer: tuple | None = None,
+    arch_keys: list | None = None,
 ):
+    """Run meta-NCA training.
+
+    ``train_batches``/``val_batches`` are EITHER the classic ``(X, Y, M)`` tuple
+    (all archs, including the test arch, share the same batch stream — used
+    for classification) OR a ``dict[key, (X, Y, M)]`` mapping each distinct
+    vocab/arch-family's key to its own token stream (used for mixed-vocab LLM
+    pools). In dict-mode, ``arch_keys`` must list each training model's key in
+    ``models`` order, with the LAST entry naming ``test_model``'s key.
+    """
     logger.info("Hydra training config:\n%s", cfg)
     input_shape = tuple(cfg.dataset.input_shape)
     n_spatial_dims = _n_spatial_dims(input_shape)
+
+    dict_mode = isinstance(train_batches, dict)
+    if dict_mode and not arch_keys:
+        raise ValueError("arch_keys is required when train_batches/val_batches are dicts")
+
+    sample_x = train_batches[arch_keys[0]][0] if dict_mode else train_batches[0]
+    dummy_input_dtype = (
+        jnp.int32 if jnp.issubdtype(sample_x.dtype, jnp.integer) else jnp.float32
+    )
+
     training_vars = before_metanca_training(
         cfg,
         models=models,
         test_model=test_model,
         rand_key=jax.random.key(cfg.random.seed),
         shared_initializer=shared_initializer,
+        dummy_input_dtype=dummy_input_dtype,
     )
 
     devices = jax.devices()
@@ -201,10 +235,25 @@ def train_metanca(
     adjs = tuple(tasknet.adj for tasknet in tasknets)
     tasknet_param_names = tuple(tuple(tasknet.iter_param_names()) for tasknet in tasknets)
     tasknet_apply_fns = tuple(tasknet.model.apply for tasknet in tasknets)
+    n_archs = len(tasknets)
+
+    if dict_mode and len(arch_keys) != n_archs + 1:
+        raise ValueError(
+            f"arch_keys must have len(models) + 1 = {n_archs + 1} entries "
+            f"(one per training arch, plus the test arch's key), got {len(arch_keys)}"
+        )
+    train_arch_keys = arch_keys[:-1] if dict_mode else None
+    test_arch_key = arch_keys[-1] if dict_mode else None
+
+    def _val_batches_for(key: object | None) -> chex.Array:
+        """Select the val batch stream for `key` (dict-mode) or the shared stream."""
+        return val_batches[key] if dict_mode else val_batches
 
     hidden_dim = training_vars.hidden_dim
 
-    n_train_batches = train_batches[0].shape[0]
+    n_train_batches = (
+        train_batches[arch_keys[0]][0].shape[0] if dict_mode else train_batches[0].shape[0]
+    )
     local_rule_params = training_vars.local_rule_params
 
     optimizer = training_vars.optimizer
@@ -293,13 +342,27 @@ def train_metanca(
 
         for i, batch_idx in enumerate(shuffled_inds):
             t_start_batch = time.time()
-            batch_x_uint8, batch_y, mask = (
-                train_batches[0][batch_idx],
-                train_batches[1][batch_idx],
-                train_batches[2][batch_idx],
-            )
-            batch_x = promote_image_batch(batch_x_uint8)
-            batch = (batch_x, batch_y, mask)
+            if dict_mode:
+                # Each arch draws its batch from ITS OWN vocab's token stream, at
+                # the same shuffled batch_idx (all streams share n_train_batches).
+                per_arch_batches = []
+                for k in train_arch_keys:
+                    xs_k, ys_k, mask_k = train_batches[k]
+                    x_k = xs_k[batch_idx]
+                    x_k = _maybe_promote_image_batch(x_k)
+                    per_arch_batches.append((x_k, ys_k[batch_idx], mask_k[batch_idx]))
+                batches = tuple(per_arch_batches)
+            else:
+                batch_x_uint8, batch_y, mask = (
+                    train_batches[0][batch_idx],
+                    train_batches[1][batch_idx],
+                    train_batches[2][batch_idx],
+                )
+                batch_x = _maybe_promote_image_batch(batch_x_uint8)
+                batches = tuple([(batch_x, batch_y, mask)] * n_archs)
+            # Representative batch for callbacks/logging (matches legacy shared-batch
+            # semantics in tuple-mode; in dict-mode this is the first train arch's batch).
+            batch_x, batch_y, mask = batches[0]
             t_after_prep = time.time()
 
             t_train_start = time.time()
@@ -312,7 +375,7 @@ def train_metanca(
                     opt_state,
                     rand_key,
                 ) = metanca_train_step_multi_gpu(
-                    batch=batch,
+                    batches=batches,
                     local_rule_net_apply=training_vars.local_rule_net_apply,
                     local_rule_params=local_rule_params,
                     lr_params_per_device=lr_params_per_device,
@@ -339,7 +402,7 @@ def train_metanca(
                     opt_state,
                     rand_key,
                 ) = metanca_train_step(
-                    batch=batch,
+                    batches=batches,
                     local_rule_net_apply=training_vars.local_rule_net_apply,
                     local_rule_params=local_rule_params,
                     rand_key=rand_key,
@@ -502,7 +565,7 @@ def train_metanca(
             # Run validation
             rand_key, val_key = jax.random.split(rand_key)
             val_metrics, callback_runner = metanca_validation_step(
-                val_batches=val_batches,
+                val_batches=_val_batches_for(test_arch_key),
                 local_rule_net_apply=training_vars.local_rule_net_apply,
                 local_rule_params=local_rule_params,
                 rand_key=val_key,
@@ -525,7 +588,7 @@ def train_metanca(
             # Run validation with 2x update steps
             rand_key, val_2x_key = jax.random.split(rand_key)
             val_2x_metrics, callback_runner = metanca_validation_step(
-                val_batches=val_batches,
+                val_batches=_val_batches_for(test_arch_key),
                 local_rule_net_apply=training_vars.local_rule_net_apply,
                 local_rule_params=local_rule_params,
                 rand_key=val_2x_key,
@@ -550,7 +613,9 @@ def train_metanca(
             for arch_idx, train_tasknet in enumerate(tasknets):
                 rand_key, train_val_key = jax.random.split(rand_key)
                 train_arch_val_metrics, callback_runner = metanca_validation_step(
-                    val_batches=val_batches,
+                    val_batches=_val_batches_for(
+                        train_arch_keys[arch_idx] if dict_mode else None
+                    ),
                     local_rule_net_apply=training_vars.local_rule_net_apply,
                     local_rule_params=local_rule_params,
                     rand_key=train_val_key,

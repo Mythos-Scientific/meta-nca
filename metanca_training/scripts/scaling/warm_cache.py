@@ -111,6 +111,8 @@ def main() -> None:
     logger.info("warming %s T=%d rep=%d on %d device(s); train n=%s eval n=%d",
                 args.ablation, args.T, args.rep, len(devices), args.steps, args.eval_steps)
 
+    batches = tuple([batch] * len(tdl))
+
     if not args.skip_train:
         if multi:
             tdl_staged = stage_data_to_devices(tdl, devices)
@@ -119,7 +121,7 @@ def main() -> None:
             t0 = time.time()
             if multi:
                 out = metanca_train_step_multi_gpu(
-                    batch=batch, local_rule_net_apply=tvars.local_rule_net_apply,
+                    batches=batches, local_rule_net_apply=tvars.local_rule_net_apply,
                     local_rule_params=tvars.local_rule_params,
                     lr_params_per_device=lr_per_dev, rand_key=key,
                     tasknet_data_list=tdl_staged, adjs=adjs, tasknet_param_names=pnames,
@@ -132,7 +134,7 @@ def main() -> None:
                 )
             else:
                 out = metanca_train_step(
-                    batch=batch, local_rule_net_apply=tvars.local_rule_net_apply,
+                    batches=batches, local_rule_net_apply=tvars.local_rule_net_apply,
                     local_rule_params=tvars.local_rule_params, rand_key=key,
                     tasknet_data_list=tdl, adjs=adjs, tasknet_param_names=pnames,
                     tasknet_apply_fns=apply_fns, n_update_steps=n,

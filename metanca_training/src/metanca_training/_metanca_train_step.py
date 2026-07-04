@@ -32,7 +32,7 @@ from ._types import ApplyFn, Device
     ),
 )
 def metanca_train_step(
-    batch: tuple[jax.Array, jax.Array, jax.Array],
+    batches: Sequence[tuple[jax.Array, jax.Array, jax.Array]],
     local_rule_net_apply: Callable[..., jax.Array],
     local_rule_params: chex.ArrayTree,
     rand_key: chex.PRNGKey,
@@ -59,7 +59,7 @@ def metanca_train_step(
     rand_key, train_key = jax.random.split(rand_key)
 
     avg_loss, local_rule_grads, new_tasknet_data_list = calculate_metanca_gradients(
-        batch=batch,
+        batches=batches,
         local_rule_net_apply=local_rule_net_apply,
         local_rule_net_params=local_rule_params,
         rand_key=train_key,
@@ -105,7 +105,7 @@ def _jitted_accumulate_and_optimize(
 
 
 def metanca_train_step_multi_gpu(
-    batch: tuple[jax.Array, jax.Array, jax.Array],
+    batches: Sequence[tuple[jax.Array, jax.Array, jax.Array]],
     local_rule_net_apply: Callable[..., jax.Array],
     local_rule_params: chex.ArrayTree,
     lr_params_per_device: list[chex.ArrayTree],
@@ -144,7 +144,7 @@ def metanca_train_step_multi_gpu(
     rand_key, train_key = jax.random.split(rand_key)
 
     avg_loss, all_grads, new_tasknet_data_list = calculate_metanca_gradients_multi_gpu(
-        batch=batch,
+        batches=batches,
         local_rule_net_apply=local_rule_net_apply,
         lr_params_per_device=lr_params_per_device,
         rand_key=train_key,

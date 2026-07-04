@@ -15,8 +15,13 @@ from ._base import EMPTY_RESULT, HookResult, TrainingContext
 
 
 def accuracy(preds: jax.Array, targets: jax.Array, mask: jax.Array | None = None) -> chex.Scalar:
-    """Compute classification accuracy (optionally masked)."""
-    target_class = jnp.argmax(targets, axis=-1)
+    """Compute classification accuracy (optionally masked).
+
+    `targets` may be one-hot (same rank as `preds`, classification) or integer
+    class labels (rank == preds.ndim - 1, sparse LM targets) — mirrors the
+    `labels.ndim` dispatch in `_loss._auto_loss_fn`.
+    """
+    target_class = jnp.argmax(targets, axis=-1) if targets.ndim == preds.ndim else targets
     predicted_class = jnp.argmax(preds, axis=-1)
     correct = predicted_class == target_class
     if mask is None:
