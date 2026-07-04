@@ -6,6 +6,7 @@ from jax.typing import ArrayLike
 
 from metanca.strategies import (
     register_argument_strategy,
+    register_backward_slice_strategy,
     register_forward_slice_strategy,
     register_strategy,
 )
@@ -34,6 +35,21 @@ def get_forward_slice_info_mul(
 
 @register_strategy("forward_neighbors_factory", "mul")
 def forward_neighbors_mul_factory(
+    focus_shape: ArrayLike, neighbor_shape: ArrayLike
+) -> Callable[[jax.Array], jax.Array]:
+    return forward_neighbors_elementwise_nonbarrier_factory(focus_shape, neighbor_shape, "mul")
+
+
+# Elementwise: backward strategies are identical to forward.
+@register_backward_slice_strategy(strategy_name="mul")
+def get_backward_slice_info_mul(
+    focus_shape: Sequence[int], neighbor_shape: Sequence[int]
+) -> SliceInfo:
+    return get_forward_slice_info_elementwise_nonbarrier(focus_shape, neighbor_shape, "mul")
+
+
+@register_strategy("backward_neighbors_factory", "mul")
+def backward_neighbors_mul_factory(
     focus_shape: ArrayLike, neighbor_shape: ArrayLike
 ) -> Callable[[jax.Array], jax.Array]:
     return forward_neighbors_elementwise_nonbarrier_factory(focus_shape, neighbor_shape, "mul")

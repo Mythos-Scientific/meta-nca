@@ -6,5 +6,6 @@ from ._local_rule_net import LocalRuleNet
 from ._local_rule_net_forward import local_rule_net_forward
 from ._multi_layer_perceptron import MultiLayerPerceptron
 from ._tasknet import TaskNet
+from ._tiny_causal_lm import TinyCausalLM
 from ._update_tasknet import update_tasknet
 from .resnet import ResNet
