@@ -15,3 +15,5 @@ pandas
 scikit-learn
 tqdm
 evosax
+
+sentencepiece
