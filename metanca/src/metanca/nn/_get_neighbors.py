@@ -59,7 +59,7 @@ def _create_reflexive_neuron_view(
     hidden_dim: int,
     param_shape: Sequence[int],
     param_name: str,
-    param_type: Literal["bias", "kernel"],
+    param_type: Literal["bias", "kernel", "embedding", "scale"],
     direction: Literal["fwd", "bwd"],
 ) -> tuple[NeuronView, int]:
     focus_nv = {}
@@ -70,8 +70,21 @@ def _create_reflexive_neuron_view(
         case ("kernel", "bwd"):
             focus_index_dim = len(param_shape) - 2
 
+        case ("embedding", "fwd"):
+            # Embedding shape is (vocab, d_model); the output neuron is d_model.
+            focus_index_dim = len(param_shape) - 1
+        case ("embedding", "bwd"):
+            focus_index_dim = len(param_shape) - 2
+
         case ("bias", _):
             focus_index_dim = 0
+        case ("scale", _):
+            # 1-D RMSNorm/LayerNorm scale: only one axis to iterate.
+            focus_index_dim = 0
+        case _:
+            raise ValueError(
+                f"Unsupported param_type/direction pair: ({param_type!r}, {direction!r})"
+            )
 
     nv_attrs = ("weights", "hidden_states", "positional_encodings")
     tasknet_attrs = (params, hidden_states, positional_encodings)

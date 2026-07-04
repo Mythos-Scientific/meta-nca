@@ -31,7 +31,13 @@ def get_layer_names_from_shapes(layer_shapes: dict) -> list[str]:
     Returns:
         List of unique layer names in order of first occurrence.
     """
-    return list(_unique_everseen(map(lambda x: re.sub(r"(.bias)|(.kernel)", "", x), layer_shapes)))
+    # Strip recognised Flax param-role suffixes so siblings (kernel/bias,
+    # embedding, scale) collapse onto a single layer identity.
+    return list(
+        _unique_everseen(
+            re.sub(r"\.(?:bias|kernel|embedding|scale)$", "", name) for name in layer_shapes
+        )
+    )
 
 
 def create_unified_initializer(
@@ -60,16 +66,20 @@ def create_unified_initializer(
     Returns:
         Tuple of (initializer_function, hidden_dim).
     """
-    # Find maximum dimensions across all kernel shapes
-    kernel_shapes = {k: v for k, v in all_layer_shapes.items() if ".kernel" in k}
+    # Find maximum dimensions across all primary param shapes (kernel/embedding/scale).
+    _primary_suffixes = (".kernel", ".embedding", ".scale")
+    primary_shapes = {
+        k: v for k, v in all_layer_shapes.items() if any(k.endswith(s) for s in _primary_suffixes)
+    }
+    if not primary_shapes:
+        primary_shapes = {k: v for k, v in all_layer_shapes.items() if ".bias" not in k}
+    if not primary_shapes:
+        raise ValueError("No primary param shapes found in all_layer_shapes")
 
-    if not kernel_shapes:
-        raise ValueError("No kernel shapes found in all_layer_shapes")
-
-    max_ndim = max(max(len(v) for v in kernel_shapes.values()), n_spatial_dims + 2)
+    max_ndim = max(max(len(v) for v in primary_shapes.values()), n_spatial_dims + 2)
 
     all_kernel_shapes = jnp.stack(
-        [_cast_and_expand(shape, max_ndim) for shape in kernel_shapes.values()], axis=0
+        [_cast_and_expand(shape, max_ndim) for shape in primary_shapes.values()], axis=0
     )
     max_layer_dims = jnp.max(all_kernel_shapes, axis=0)
 
@@ -89,8 +99,17 @@ def initializer_from_parameters(
     layers = get_layer_names_from_shapes(layer_shapes)
     max_ndim = max(max(len(v) for v in layer_shapes.values()), n_spatial_dims + 2)
 
+    _primary_roles = ("kernel", "embedding", "scale", "bias")
+
+    def _primary_shape(layer: str) -> tuple[int, ...]:
+        for role in _primary_roles:
+            key = f"{layer}.{role}"
+            if key in layer_shapes:
+                return layer_shapes[key]
+        raise KeyError(f"No recognized param role found for layer {layer}")
+
     all_kernel_shapes = jnp.stack(
-        [_cast_and_expand(layer_shapes[f"{layer}.kernel"], max_ndim) for layer in layers], axis=0
+        [_cast_and_expand(_primary_shape(layer), max_ndim) for layer in layers], axis=0
     )
     max_layer_dims = jnp.max(all_kernel_shapes, axis=0)
     initializer, hidden_dim = hidden_state_initializer(
