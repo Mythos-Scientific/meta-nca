@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import random
 import time
@@ -76,6 +77,7 @@ def before_metanca_training(
     rand_key: chex.PRNGKey,
     shared_initializer: tuple | None = None,
     dummy_input_dtype: jnp.dtype = jnp.float32,
+    checkpoint_monitor: str = "accuracy",
 ) -> TrainingVars:
     input_shape = tuple(cfg.dataset.input_shape)
     n_spatial_dims = _n_spatial_dims(input_shape)
@@ -102,8 +104,7 @@ def before_metanca_training(
         dummy_input_dtype=dummy_input_dtype,
     )
 
-    # TODO: could configure this if we wanted.
-    monitor = "accuracy"
+    monitor = checkpoint_monitor
 
     local_rule_net, local_rule_params = init_local_rule_net(
         local_rule_arch,
@@ -180,6 +181,22 @@ def before_metanca_training(
     return tvars
 
 
+def _add_lm_metrics(metrics: dict, lm_val_factor: float | None) -> dict:
+    """Augment a metrics dict that contains `loss` with `perplexity = exp(loss)` and
+    `bpb = loss * lm_val_factor / ln(2)`, for LLM-scaling runs (`lm_val_factor` set).
+
+    The same (val) factor is reused for train- and val-split metrics alike: for a fixed
+    tokenizer, train_factor ~= val_factor (both estimate the same corpus/tokenizer's
+    tokens/byte ratio), so a single factor throughout is a harmless simplification.
+
+    No-op (returns `metrics` unchanged) when `lm_val_factor` is None or `loss` is absent,
+    so classification/tuple-mode callers are unaffected."""
+    if lm_val_factor is None or "loss" not in metrics:
+        return metrics
+    loss = metrics["loss"]
+    return {**metrics, "perplexity": jnp.exp(loss), "bpb": loss * lm_val_factor / math.log(2)}
+
+
 def log_dict(
     metrics: dict[str, float],
     step: int,
@@ -204,6 +221,7 @@ def train_metanca(
     test_model: nn.Module,
     shared_initializer: tuple | None = None,
     arch_keys: list | None = None,
+    lm_val_factor: float | None = None,
 ):
     """Run meta-NCA training.
 
@@ -213,6 +231,13 @@ def train_metanca(
     vocab/arch-family's key to its own token stream (used for mixed-vocab LLM
     pools). In dict-mode, ``arch_keys`` must list each training model's key in
     ``models`` order, with the LAST entry naming ``test_model``'s key.
+
+    ``lm_val_factor``, when set, switches in-loop metrics/checkpointing from
+    token-accuracy to perplexity/bpb (both derived from ``loss``): the accuracy
+    callback is not registered, every logged metrics dict gets `perplexity`/`bpb`
+    keys added (see `_add_lm_metrics`), and checkpoints are ranked by `neg_loss`
+    (largest = smallest loss) instead of `accuracy`. When ``None`` (the default),
+    behavior is bit-identical to before this parameter existed.
     """
     logger.info("Hydra training config:\n%s", cfg)
     input_shape = tuple(cfg.dataset.input_shape)
@@ -225,6 +250,7 @@ def train_metanca(
     sample_x = train_batches[arch_keys[0]][0] if dict_mode else train_batches[0]
     dummy_input_dtype = _infer_dummy_input_dtype(sample_x.dtype)
 
+    checkpoint_monitor = "neg_loss" if lm_val_factor is not None else "accuracy"
     training_vars = before_metanca_training(
         cfg,
         models=models,
@@ -232,6 +258,7 @@ def train_metanca(
         rand_key=jax.random.key(cfg.random.seed),
         shared_initializer=shared_initializer,
         dummy_input_dtype=dummy_input_dtype,
+        checkpoint_monitor=checkpoint_monitor,
     )
 
     devices = jax.devices()
@@ -271,7 +298,9 @@ def train_metanca(
     opt_state = training_vars.optimizer_state
     rand_key = jax.random.key(cfg.random.seed)
 
-    callbacks = [create_accuracy_callback()]
+    # LM-scaling runs (lm_val_factor set) rank/monitor by loss-derived metrics instead of
+    # token accuracy, so the accuracy callback (and its per-batch compute cost) is skipped.
+    callbacks = [] if lm_val_factor is not None else [create_accuracy_callback()]
     if getattr(cfg.training, "early_stopping_enabled", True):
         callbacks.append(
             create_early_stopping(
@@ -539,6 +568,10 @@ def train_metanca(
         else:
             ema_loss = 0.01 * float(metric_avgs["loss"]) + 0.99 * ema_loss
 
+        # LM-scaling runs: add perplexity/bpb (derived from loss) to the per-metaepoch
+        # train metrics logged below and passed to save_checkpoint.
+        metric_avgs = _add_lm_metrics(metric_avgs, lm_val_factor)
+
         pool_metrics = {}
         if pools:
             pool_metrics["pool/avg_size"] = sum(p.size for p in pools) / len(pools)
@@ -557,9 +590,15 @@ def train_metanca(
             best_metrics=best_metrics,
         )
 
+        # LM-scaling runs: BestN checkpoint retention monitors `neg_loss` (largest kept =
+        # smallest loss) instead of `accuracy` (see checkpoint_monitor above).
+        checkpoint_metrics = metric_avgs
+        if lm_val_factor is not None:
+            checkpoint_metrics = {**metric_avgs, "neg_loss": -metric_avgs["loss"]}
+
         save_checkpoint(
             metaepoch,
-            metric_avgs,
+            checkpoint_metrics,
             local_rule_params,
             opt_state,
             training_vars.checkpoint_metadata,
@@ -596,7 +635,10 @@ def train_metanca(
             )
 
             best_metrics = log_dict(
-                {f"val_arch/val_data_{name}": value for name, value in val_metrics.items()},
+                {
+                    f"val_arch/val_data_{name}": value
+                    for name, value in _add_lm_metrics(val_metrics, lm_val_factor).items()
+                },
                 step=metaepoch,
                 prefix="Validation (val arch, val data)",
                 best_metrics=best_metrics,
@@ -619,7 +661,10 @@ def train_metanca(
             )
 
             best_metrics = log_dict(
-                {f"val_arch/val_data_2x_{name}": value for name, value in val_2x_metrics.items()},
+                {
+                    f"val_arch/val_data_2x_{name}": value
+                    for name, value in _add_lm_metrics(val_2x_metrics, lm_val_factor).items()
+                },
                 step=metaepoch,
                 prefix="Validation 2x (val arch, val data)",
                 best_metrics=best_metrics,
@@ -650,6 +695,7 @@ def train_metanca(
             train_arch_val_avgs = {
                 name: total / n_train_archs for name, total in train_arch_metric_totals.items()
             }
+            train_arch_val_avgs = _add_lm_metrics(train_arch_val_avgs, lm_val_factor)
             best_metrics = log_dict(
                 {
                     f"train_archs/val_data_{name}": value

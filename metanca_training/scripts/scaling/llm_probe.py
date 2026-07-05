@@ -4,7 +4,7 @@ for the LLM (TinyCausalLM / Shakespeare) scaling study, then project full-run ho
 
 Structured like memory_probe.py but adapted to the LLM stack (dict-mode batches, TinyCausalLM
 grid corners). Three cost centers are measured:
-  1. Per-arch corners (LLMArch(32,2,258), LLMArch(128,4,512), LLMArch(256,4,1024)):
+  1. Per-arch corners (LLMArch(32,4,10000,1), LLMArch(128,8,10000,2), LLMArch(128,4,10000,4)):
      TaskNet build time, plus single-arch `metanca_train_step` compile + steady s/batch at
      n_update_steps in {1, 10}.
   2. One T=8 mixed-vocab pool: dict-mode `metanca_train_step` compile + steady s/batch at
@@ -40,7 +40,7 @@ from metanca_training.scaling.llm_grid import (  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-CORNER_ARCHS = [LLMArch(32, 2, 258), LLMArch(128, 4, 512), LLMArch(256, 4, 1024)]
+CORNER_ARCHS = [LLMArch(32, 4, 10000, 1), LLMArch(128, 8, 10000, 2), LLMArch(128, 4, 10000, 4)]
 T_GRID = (1, 2, 4, 8, 16, 32)
 T8_SEED = 8000
 BATCH_SIZE = 8

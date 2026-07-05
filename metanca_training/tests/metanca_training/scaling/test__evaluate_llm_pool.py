@@ -33,10 +33,10 @@ def test_evaluate_llm_pool_rows():
     val_batches = {512: _fake_lm_batches(512, seed=2), 1024: _fake_lm_batches(1024, seed=3)}
     factors = {512: {"val": 4.0}, 1024: {"val": 4.2}}
 
-    train_arch = LLMArch(32, 2, 512)
-    val_arch = LLMArch(48, 2, 1024)
+    train_arch = LLMArch(32, 2, 512, 1)
+    val_arch = LLMArch(48, 2, 1024, 1)
 
-    # Too slow to probe the real grid-max LLMArch(256, 4, 1024) in a test; probing this
+    # Too slow to probe the real grid-max LLMArch(128, 4, 10000, 4) in a test; probing this
     # test's own (larger) val arch is a sufficient shared initializer for these two archs.
     probe_key, key = jax.random.split(key)
     import metanca
@@ -79,7 +79,7 @@ def test_evaluate_llm_pool_rows():
         training_vars=tvars, local_rule_params=tvars.local_rule_params,
         archs=archs, val_batches=val_batches, factors=factors, cfg=cfg,
         n_update_steps=1, n_init_samples=1, rand_key=key,
-        skip_ids={"llm_d32_h2_v512"}, on_row=seen.append,
+        skip_ids={"llm_d32_h2_r1_v512"}, on_row=seen.append,
     )
-    assert [r["arch_id"] for r in rows2] == ["llm_d48_h2_v1024"]  # skipped d32/h2/v512
+    assert [r["arch_id"] for r in rows2] == ["llm_d48_h2_r1_v1024"]  # skipped d32/h2/r1/v512
     assert seen == rows2  # on_row fired per surviving arch

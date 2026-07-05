@@ -16,7 +16,7 @@ from metanca_training import train_metanca  # noqa: E402
 from metanca_training._hydra_configs import register_configs  # noqa: E402
 from metanca_training.lm_data import load_multi_vocab_shakespeare  # noqa: E402
 from metanca_training.scaling.llm_grid import (  # noqa: E402
-    D_MODELS, HEADS, LLMArch, VOCABS, build_tiny_lm, sample_llm_subset, split_llm_grid,
+    D_MODELS, HEADS, LLMArch, MLP_RATIOS, VOCABS, build_tiny_lm, sample_llm_subset, split_llm_grid,
 )
 from metanca_training.scaling.evaluate_llm_pool import evaluate_llm_pool  # noqa: E402
 
@@ -24,7 +24,7 @@ CONFIG_DIR = str((Path(__file__).parents[2] / "configs").resolve())
 logger = logging.getLogger(__name__)
 
 SPLIT_SEED = 20260701  # fixed: the held-out V is identical across all T and reps
-LARGEST_LLM_ARCH = LLMArch(256, 4, 1024)  # spans the grid; used to provision the shared initializer
+LARGEST_LLM_ARCH = LLMArch(128, 4, 10000, 4)  # spans the grid; used to provision the shared initializer
 
 
 def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int):
@@ -112,6 +112,7 @@ def main() -> None:
             "study": "llm_shakespeare", "T": args.T, "rep": args.rep, "seed": seed,
             "metaepochs": args.metaepochs,
             "d_models": list(D_MODELS), "heads": list(HEADS), "vocabs": list(VOCABS),
+            "mlp_ratios": list(MLP_RATIOS),
         },
     )
 
@@ -143,10 +144,16 @@ def main() -> None:
     )
     shared_init = (probe_tasknet.hidden_state_initializer, probe_tasknet.hidden_dim)
 
+    # In-loop metrics/checkpointing switch to perplexity/bpb (derived from loss) instead of
+    # token accuracy for this LM study; the factor is the (fixed) tokenizer's val tokens/byte
+    # ratio, keyed dynamically off the loader's single vocab (never hardcode 10000 here).
+    (lm_vocab,) = mvlm.vocabs
+    lm_val_factor = mvlm.factors[lm_vocab]["val"]
+
     # Resumes from the per-run checkpoint (local_rule_checkpoints/<run_name>) if present.
     params, tvars = train_metanca(
         train_batches, val_batches, cfg=cfg, models=models, test_model=test_model,
-        shared_initializer=shared_init, arch_keys=arch_keys,
+        shared_initializer=shared_init, arch_keys=arch_keys, lm_val_factor=lm_val_factor,
     )
 
     skip_ids = _existing_arch_ids(out)   # resume: don't re-evaluate finished archs
