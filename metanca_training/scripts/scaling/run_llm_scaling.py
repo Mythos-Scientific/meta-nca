@@ -36,7 +36,7 @@ def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int):
                 "dataset=fashion_mnist", "wandb=disabled",
                 f"training.num_metaepochs={metaepochs}",
                 "training.update_step_scheduler_type=increment",
-                "training.update_step_scheduler_rate=10",
+                "training.update_step_scheduler_rate=15",
                 "training.update_step_scheduler_max_steps=10",
                 "training.early_stopping_enabled=false",
                 "training.sample_pooling.enabled=false",
@@ -66,8 +66,8 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--rep", type=int, required=True)
-    p.add_argument("--metaepochs", type=int, default=120)
-    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--metaepochs", type=int, default=170)
+    p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--max-eval-dmodel", type=int, default=None,
                    help="skip evaluating archs with d_model above this (e.g. 192 on 32GB "
                         "GPUs); .done is withheld so a larger-memory worker can finish them")

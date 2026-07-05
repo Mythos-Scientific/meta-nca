@@ -25,3 +25,12 @@ def test_collate_same_chunks_all_vocabs():
                          pad_ids={1: 251, 2: 251})
     assert set(out) == {1, 2}
     assert out[1][0].shape == out[2][0].shape   # same n_chunks x context
+
+
+def test_batchify_pads_never_drops():
+    from metanca_training.lm_data import _batchify
+    arr = np.arange(10 * 3, dtype=np.int32).reshape(10, 3)   # 10 rows, batch 4 -> pad to 12
+    out = _batchify(arr, 4)
+    assert out.shape == (3, 4, 3)
+    assert (out.reshape(-1, 3)[:10] == arr).all()            # every real row survives
+    assert (out.reshape(-1, 3)[10:] == 0).all()              # tail is zero-padded (mask=False rows)

@@ -52,8 +52,17 @@ def collate_chunks(chunks, sps: dict[int, Any], context: int, pad_ids: dict[int,
 
 
 def _batchify(arr: np.ndarray, batch_size: int) -> np.ndarray:
-    n = (len(arr) // batch_size) * batch_size          # drop ragged tail (shared across vocabs)
-    return arr[:n].reshape(-1, batch_size, *arr.shape[1:])
+    """Reshape to [n_batches, batch_size, ...], PADDING the ragged tail with zero rows.
+
+    No data is ever dropped (protocol decision, 2026-07-05): padded rows carry an all-False
+    mask (M pads to False; X/Y pad values are never scored), so they contribute nothing to
+    losses or metrics while every real chunk is consumed at any batch size.
+    """
+    rem = (-len(arr)) % batch_size
+    if rem:
+        pad_block = np.zeros((rem, *arr.shape[1:]), dtype=arr.dtype)
+        arr = np.concatenate([arr, pad_block], axis=0)
+    return arr.reshape(-1, batch_size, *arr.shape[1:])
 
 
 def load_multi_vocab_shakespeare(data_dir: str, batch_size: int = 8, val_split: float = 0.1):
@@ -66,7 +75,8 @@ def load_multi_vocab_shakespeare(data_dir: str, batch_size: int = 8, val_split: 
     # equivalent for pure-ASCII text (each char == 1 byte).
     assert text.isascii(), "chunking assumes 1 byte == 1 char; recalibrate chunking.json for non-ASCII corpora"
     cb = int(cfg["chunk_bytes"])
-    chunks = [text[i:i + cb] for i in range(0, len(text) - cb + 1, cb)]
+    # include the final partial chunk — no data dropped anywhere in this pipeline
+    chunks = [text[i:i + cb] for i in range(0, len(text), cb)]
     n_train = int(len(chunks) * (1.0 - val_split))
     sps = {v: (_ByteTokenizer() if v == BYTE_VOCAB else
                spm.SentencePieceProcessor(model_file=str(d / f"shakespeare_{v}_bpe.model")))
@@ -74,13 +84,11 @@ def load_multi_vocab_shakespeare(data_dir: str, batch_size: int = 8, val_split: 
     pad_ids = {v: sps[v].pad_id() for v in vocabs}
 
     train, val, factors = {}, {}, {}
-    for split_name, all_split_chunks, store in (("train", chunks[:n_train], train),
-                                                ("val", chunks[n_train:], val)):
-        # Truncate to the batch-aligned population BEFORE collating, so the collate,
-        # the batchified arrays, and the factor numerator/denominator all cover
-        # exactly the same chunks (_batchify drops the ragged tail otherwise).
-        n_aligned = (len(all_split_chunks) // batch_size) * batch_size
-        split_chunks = all_split_chunks[:n_aligned]
+    for split_name, split_chunks, store in (("train", chunks[:n_train], train),
+                                            ("val", chunks[n_train:], val)):
+        # ALL split chunks are collated and consumed; _batchify pads (never drops) the
+        # ragged tail with fully-masked rows, so factors computed over the collated
+        # population exactly match what training/eval scores.
         col = collate_chunks(split_chunks, sps, context, pad_ids)
         n_bytes = sum(len(c.encode("utf-8")) for c in split_chunks)
         for v, (X, Y, M) in col.items():
