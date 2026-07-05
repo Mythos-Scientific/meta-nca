@@ -27,7 +27,8 @@ SPLIT_SEED = 20260701  # fixed: the held-out V is identical across all T and rep
 LARGEST_LLM_ARCH = LLMArch(128, 4, 10000, 4)  # spans the grid; used to provision the shared initializer
 
 
-def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int):
+def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int,
+              scheduler_rate: int = 30):
     register_configs()
     with initialize_config_dir(version_base=None, config_dir=CONFIG_DIR):
         return compose(
@@ -36,7 +37,7 @@ def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int):
                 "dataset=fashion_mnist", "wandb=disabled",
                 f"training.num_metaepochs={metaepochs}",
                 "training.update_step_scheduler_type=increment",
-                "training.update_step_scheduler_rate=15",
+                f"training.update_step_scheduler_rate={scheduler_rate}",
                 "training.update_step_scheduler_max_steps=10",
                 "training.early_stopping_enabled=false",
                 "training.sample_pooling.enabled=false",
@@ -66,7 +67,8 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--rep", type=int, required=True)
-    p.add_argument("--metaepochs", type=int, default=170)
+    p.add_argument("--metaepochs", type=int, default=330)
+    p.add_argument("--increment-rate", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--max-eval-dmodel", type=int, default=None,
                    help="skip evaluating archs with d_model above this (e.g. 192 on 32GB "
@@ -98,7 +100,7 @@ def main() -> None:
     mvlm = load_multi_vocab_shakespeare(args.data_dir, batch_size=args.batch_size)
     ctx = mvlm.context_length
 
-    cfg = build_cfg(run_name, args.metaepochs, seed, ctx)
+    cfg = build_cfg(run_name, args.metaepochs, seed, ctx, scheduler_rate=args.increment_rate)
     # Log every scaling run to wandb (project: architecture-scaling-ablation). Use the run_name
     # as a stable id + resume="allow" so a resumed run continues the same wandb run. Smoke runs
     # stay disabled.
