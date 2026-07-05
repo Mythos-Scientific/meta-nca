@@ -69,6 +69,8 @@ def main() -> None:
     p.add_argument("--rep", type=int, required=True)
     p.add_argument("--metaepochs", type=int, default=330)
     p.add_argument("--increment-rate", type=int, default=30)
+    p.add_argument("--wandb-suffix", type=str, default="v10k-m330",
+                   help="appended to wandb run name/id so each study config gets fresh runs")
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--max-eval-dmodel", type=int, default=None,
                    help="skip evaluating archs with d_model above this (e.g. 192 on 32GB "
@@ -83,6 +85,7 @@ def main() -> None:
 
     seed = 1000 * args.T + args.rep
     run_name = f"scaling_llm_T{args.T}_rep{args.rep}"
+    wandb_run_name = f"{run_name}-{args.wandb_suffix}" if args.wandb_suffix else run_name
 
     run_dir = Path(args.results_dir) / "llm"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -106,8 +109,8 @@ def main() -> None:
     # stay disabled.
     wandb.init(
         project="architecture-scaling-ablation",
-        name=run_name,
-        id=run_name,
+        name=wandb_run_name,
+        id=wandb_run_name,
         resume="allow",
         mode=("disabled" if args.smoke else "online"),
         config={
