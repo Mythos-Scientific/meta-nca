@@ -36,7 +36,7 @@ def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int):
                 "dataset=fashion_mnist", "wandb=disabled",
                 f"training.num_metaepochs={metaepochs}",
                 "training.update_step_scheduler_type=increment",
-                "training.update_step_scheduler_rate=100",
+                "training.update_step_scheduler_rate=25",
                 "training.update_step_scheduler_max_steps=10",
                 "training.early_stopping_enabled=false",
                 "training.sample_pooling.enabled=false",
@@ -66,7 +66,11 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--rep", type=int, required=True)
-    p.add_argument("--metaepochs", type=int, default=1200)
+    p.add_argument("--metaepochs", type=int, default=300)
+    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--max-eval-dmodel", type=int, default=None,
+                   help="skip evaluating archs with d_model above this (e.g. 192 on 32GB "
+                        "GPUs); .done is withheld so a larger-memory worker can finish them")
     p.add_argument("--results-dir", type=str, default="results/scaling")
     p.add_argument("--data-dir", type=str, default="metanca_training/data/shakespeare")
     p.add_argument("--smoke", action="store_true")
@@ -91,7 +95,7 @@ def main() -> None:
     logger.info("llm T=%d rep=%d | pool=%d val=%d train=%d",
                 args.T, args.rep, len(pool), len(val_archs), len(train_archs))
 
-    mvlm = load_multi_vocab_shakespeare(args.data_dir, batch_size=8)
+    mvlm = load_multi_vocab_shakespeare(args.data_dir, batch_size=args.batch_size)
     ctx = mvlm.context_length
 
     cfg = build_cfg(run_name, args.metaepochs, seed, ctx)
@@ -150,6 +154,15 @@ def main() -> None:
         logger.info("resuming eval; %d archs already recorded", len(skip_ids))
 
     archs = [(a, "train") for a in train_archs] + [(a, "val") for a in val_archs]
+    # biggest archs last: on memory-capped workers everything else lands durably first
+    archs.sort(key=lambda t: t[0].d_model)
+    n_expected = len(archs)
+    if args.max_eval_dmodel is not None:
+        deferred = [t for t in archs if t[0].d_model > args.max_eval_dmodel]
+        archs = [t for t in archs if t[0].d_model <= args.max_eval_dmodel]
+        if deferred:
+            logger.info("deferring %d archs with d_model > %d to a larger-memory worker",
+                        len(deferred), args.max_eval_dmodel)
     fout = out.open("a")  # append; one flushed line per arch (durable)
 
     def write_row(r: dict) -> None:
@@ -169,7 +182,12 @@ def main() -> None:
         fout.close()
 
     wandb.finish()
-    done_marker.write_text("")   # mark run complete only after all archs are written
+    n_written = len(_existing_arch_ids(out))
+    if n_written >= n_expected:
+        done_marker.write_text("")   # complete only when EVERY arch (incl. deferred) has a row
+    else:
+        logger.info("run not marked done: %d/%d arch rows written (deferred archs pending)",
+                    n_written, n_expected)
     logger.info("wrote %d new rows to %s (run complete)", len(rows), out)
 
 
