@@ -16,7 +16,8 @@ from metanca_training import train_metanca  # noqa: E402
 from metanca_training._hydra_configs import register_configs  # noqa: E402
 from metanca_training.lm_data import load_multi_vocab_shakespeare  # noqa: E402
 from metanca_training.scaling.llm_grid import (  # noqa: E402
-    D_MODELS, HEADS, LLMArch, MLP_RATIOS, VOCABS, build_tiny_lm, sample_llm_subset, split_llm_grid,
+    D_MODELS, HEADS, LLMArch, MLP_RATIOS, VOCABS, build_tiny_lm, build_width_grid,
+    nested_width_subset, sample_llm_subset, split_llm_grid, split_width_grid,
 )
 from metanca_training.scaling.evaluate_llm_pool import evaluate_llm_pool  # noqa: E402
 
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 SPLIT_SEED = 20260701  # fixed: the held-out V is identical across all T and reps
 LARGEST_LLM_ARCH = LLMArch(128, 4, 10000, 4)  # spans the grid; used to provision the shared initializer
+WIDTH_SUBSET_SEED = 20260706  # width study: per-rep shuffle seed base (rep-only, so T-subsets nest)
 
 
 def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int,
@@ -67,6 +69,9 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--rep", type=int, required=True)
+    p.add_argument("--grid", choices=("mixed", "width"), default="mixed",
+                   help="'mixed' = original d/h/r grid; 'width' = width-only study "
+                        "(h=4, r=4 fixed; 24 widths; interleaved val; nested T-subsets)")
     p.add_argument("--metaepochs", type=int, default=330)
     p.add_argument("--increment-rate", type=int, default=30)
     p.add_argument("--wandb-suffix", type=str, default="v10k-m330",
@@ -84,10 +89,11 @@ def main() -> None:
         args.metaepochs = 2
 
     seed = 1000 * args.T + args.rep
-    run_name = f"scaling_llm_T{args.T}_rep{args.rep}"
+    width_study = args.grid == "width"
+    run_name = f"scaling_{'llmw' if width_study else 'llm'}_T{args.T}_rep{args.rep}"
     wandb_run_name = f"{run_name}-{args.wandb_suffix}" if args.wandb_suffix else run_name
 
-    run_dir = Path(args.results_dir) / "llm"
+    run_dir = Path(args.results_dir) / ("llm_width" if width_study else "llm")
     run_dir.mkdir(parents=True, exist_ok=True)
     out = run_dir / f"T{args.T}_rep{args.rep}.jsonl"
     done_marker = run_dir / f"T{args.T}_rep{args.rep}.done"
@@ -95,10 +101,18 @@ def main() -> None:
         logger.info("run already complete (%s); nothing to do", done_marker)
         return
 
-    pool, val_archs = split_llm_grid(SPLIT_SEED)
-    train_archs = sample_llm_subset(pool, args.T, seed=seed)
-    logger.info("llm T=%d rep=%d | pool=%d val=%d train=%d",
-                args.T, args.rep, len(pool), len(val_archs), len(train_archs))
+    if width_study:
+        pool, val_archs = split_width_grid()
+        # subset seed depends on the rep ONLY: within a rep, T-subsets are nested prefixes
+        train_archs = nested_width_subset(pool, args.T, rep_seed=WIDTH_SUBSET_SEED + args.rep)
+        largest_arch = build_width_grid()[-1]  # d_model=256 provisions the shared initializer
+    else:
+        pool, val_archs = split_llm_grid(SPLIT_SEED)
+        train_archs = sample_llm_subset(pool, args.T, seed=seed)
+        largest_arch = LARGEST_LLM_ARCH
+    logger.info("llm grid=%s T=%d rep=%d | pool=%d val=%d train=%s",
+                args.grid, args.T, args.rep, len(pool), len(val_archs),
+                [a.d_model for a in train_archs] if width_study else len(train_archs))
 
     mvlm = load_multi_vocab_shakespeare(args.data_dir, batch_size=args.batch_size)
     ctx = mvlm.context_length
@@ -114,10 +128,12 @@ def main() -> None:
         resume="allow",
         mode=("disabled" if args.smoke else "online"),
         config={
-            "study": "llm_shakespeare", "T": args.T, "rep": args.rep, "seed": seed,
-            "metaepochs": args.metaepochs,
-            "d_models": list(D_MODELS), "heads": list(HEADS), "vocabs": list(VOCABS),
-            "mlp_ratios": list(MLP_RATIOS),
+            "study": "llm_shakespeare_width" if width_study else "llm_shakespeare",
+            "T": args.T, "rep": args.rep, "seed": seed, "metaepochs": args.metaepochs,
+            **({"widths": [a.d_model for a in build_width_grid()],
+                "train_widths": [a.d_model for a in train_archs]} if width_study else
+               {"d_models": list(D_MODELS), "heads": list(HEADS), "vocabs": list(VOCABS),
+                "mlp_ratios": list(MLP_RATIOS)}),
         },
     )
 
@@ -138,7 +154,7 @@ def main() -> None:
     # Provisioned by probing the LARGEST arch in the grid (spans d_model/vocab extremes).
     probe_key = jax.random.key(seed)
     probe_tasknet = metanca.TaskNet.build(
-        model=build_tiny_lm(LARGEST_LLM_ARCH, ctx),
+        model=build_tiny_lm(largest_arch, ctx),
         input_shape=(ctx,),
         key=probe_key,
         n_spatial_dims=0,

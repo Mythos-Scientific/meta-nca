@@ -266,15 +266,27 @@ def project(corner_results: list[dict], pool_results: dict, n_batches: int, n_va
 
 
 def main() -> None:
+    global BATCH_SIZE
     logging.basicConfig(level=logging.INFO, force=True)
     p = argparse.ArgumentParser()
     p.add_argument("--metaepochs", type=int, default=1200)
     p.add_argument("--t8-batches", type=int, default=20,
                    help="# steady batches to average for the T=8 pool measurement")
     p.add_argument("--skip-pool", action="store_true", help="corners only, skip T=8 pool + T-grid projection")
+    p.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    p.add_argument("--corners", type=str, default=None,
+                   help="override corner archs as 'd,h,v,r[;d,h,v,r...]' "
+                        "(e.g. '256,4,10000,4' to memory-probe the width-study max)")
     p.add_argument("--data-dir", type=str, default="../../data/shakespeare",
                    help="shakespeare data dir, relative to this script's directory by default")
     args = p.parse_args()
+
+    BATCH_SIZE = args.batch_size
+    corner_archs = (CORNER_ARCHS if args.corners is None else
+                    [LLMArch(*map(int, c.split(","))) for c in args.corners.split(";")])
+    # shared init is provisioned from the largest arch under probe (production convention)
+    init_arch = (LARGEST_LLM_ARCH if args.corners is None else
+                 max(corner_archs, key=lambda a: (a.d_model, a.mlp_ratio * a.d_model)))
 
     wandb.init(mode="disabled")
     key = jax.random.key(0)
@@ -296,7 +308,7 @@ def main() -> None:
     # arch-native hidden_dim.
     key, pk = jax.random.split(key)
     probe_tasknet = metanca.TaskNet.build(
-        model=build_tiny_lm(LARGEST_LLM_ARCH, ctx), input_shape=(ctx,), key=pk,
+        model=build_tiny_lm(init_arch, ctx), input_shape=(ctx,), key=pk,
         n_spatial_dims=0, d_neuron=cfg.positional_encoding.d_neuron,
         d_spatial=cfg.positional_encoding.d_spatial, d_layer=cfg.positional_encoding.d_layer,
         dummy_input_dtype=jnp.int32,
@@ -305,7 +317,7 @@ def main() -> None:
 
     logger.info("=== CORNERS ===")
     corner_results = []
-    for arch in CORNER_ARCHS:
+    for arch in corner_archs:
         key, ck = jax.random.split(key)
         r = time_corner(arch, ctx, cfg, ck, shared_init)
         corner_results.append(r)

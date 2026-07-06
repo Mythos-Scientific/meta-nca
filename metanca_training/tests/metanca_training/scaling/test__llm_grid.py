@@ -1,6 +1,7 @@
 from metanca_training.scaling.llm_grid import (
-    D_MODELS, HEADS, MLP_RATIOS, VOCABS, N_VAL_LLM, LLMArch,
+    D_MODELS, HEADS, MLP_RATIOS, VOCABS, N_VAL_LLM, WIDTH_HEADS, WIDTH_MLP_RATIO, LLMArch,
     build_llm_grid, llm_arch_id, build_tiny_lm, split_llm_grid, sample_llm_subset,
+    build_width_grid, split_width_grid, nested_width_subset,
 )
 
 
@@ -28,6 +29,41 @@ def test_split_and_sample_deterministic():
     sub = sample_llm_subset(pool, 8, seed=3)
     assert len(sub) == 8 and set(sub) <= set(pool)
     assert sample_llm_subset(pool, 8, seed=3) == sub
+
+
+def test_width_grid():
+    grid = build_width_grid()
+    ds = [a.d_model for a in grid]
+    assert len(ds) == 24 and len(set(ds)) == 24 and ds == sorted(ds)
+    assert ds[0] == 32 and ds[-1] == 256
+    for a in grid:
+        assert a.num_heads == WIDTH_HEADS and a.mlp_ratio == WIDTH_MLP_RATIO
+        assert a.d_model % 8 == 0 and 8 <= a.d_model // a.num_heads <= 64
+        assert a.vocab in VOCABS
+
+
+def test_width_split_interleaved():
+    train, val = split_width_grid()
+    grid = build_width_grid()
+    assert len(train) == 16 and len(val) == 8
+    assert [grid.index(a) for a in val] == [1, 4, 7, 10, 13, 16, 19, 22]
+    assert set(train).isdisjoint(val) and set(train) | set(val) == set(grid)
+    assert split_width_grid() == (train, val)
+
+
+def test_width_subsets_nested_within_rep():
+    train, _ = split_width_grid()
+    for rep_seed in (0, 1, 2):
+        prev = None
+        for t in (1, 2, 4, 8, 16):
+            sub = nested_width_subset(train, t, rep_seed=rep_seed)
+            assert len(sub) == t and len(set(sub)) == t and set(sub) <= set(train)
+            if prev is not None:
+                assert sub[: len(prev)] == prev  # T_i is a prefix of T_j
+            prev = sub
+    # different reps get different orderings
+    assert (nested_width_subset(train, 16, rep_seed=0)
+            != nested_width_subset(train, 16, rep_seed=1))
 
 
 def test_arch_id_and_model():
