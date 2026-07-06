@@ -21,7 +21,9 @@ import optax
 
 from metanca_training._loss import masked_sparse_softmax_cross_entropy
 from metanca_training.lm_data import load_multi_vocab_shakespeare
-from metanca_training.scaling.llm_grid import build_llm_grid, build_tiny_lm, llm_arch_id
+from metanca_training.scaling.llm_grid import (
+    build_llm_grid, build_tiny_lm, build_width_grid, llm_arch_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,13 +80,15 @@ def main() -> None:
     p.add_argument("--num-shards", type=int, default=1,
                    help="split the grid across N processes (run one per GPU)")
     p.add_argument("--shard-index", type=int, default=0, help="this process's shard [0, num_shards)")
+    p.add_argument("--grid", choices=("mixed", "width"), default="mixed",
+                   help="'width' = the width-only study grid (pass a matching --out)")
     p.add_argument("--smoke", action="store_true")
     args = p.parse_args()
 
     mvlm = load_multi_vocab_shakespeare("metanca_training/data/shakespeare", batch_size=8)
     ctx = mvlm.context_length
 
-    grid = build_llm_grid()
+    grid = build_width_grid() if args.grid == "width" else build_llm_grid()
     # shard across GPUs: strided slice keeps the arch mix balanced per shard
     grid = grid[args.shard_index :: args.num_shards]
     if args.smoke:
@@ -107,7 +111,7 @@ def main() -> None:
         results[llm_arch_id(arch)] = {
             "val_loss": best_vl, "val_ppl": val_ppl, "val_bpb": val_bpb,
             "epochs": n_epochs, "d_model": arch.d_model, "num_heads": arch.num_heads,
-            "vocab": arch.vocab,
+            "vocab": arch.vocab, "mlp_ratio": arch.mlp_ratio,
         }
         logger.info("[%d/%d] %s val_loss=%.4f val_ppl=%.2f val_bpb=%.4f (converged @ %d epochs)",
                     i + 1, len(grid), llm_arch_id(arch), best_vl, val_ppl, val_bpb, n_epochs)
