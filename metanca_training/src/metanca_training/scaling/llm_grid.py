@@ -53,7 +53,7 @@ def sample_llm_subset(pool, t: int, seed: int) -> list[LLMArch]:
 # never changes parameter shapes), so this grid varies only d_model.
 WIDTH_HEADS: int = 4          # head_dim = d/4 spans 8..64, satisfying HEAD_DIM_RANGE
 WIDTH_MLP_RATIO: int = 4
-WIDTH_RANGE: tuple[int, int] = (32, 256)
+WIDTH_RANGE: tuple[int, int] = (32, 224)  # d256's 69GB node-message tensor OOMs 96GB at any bs
 N_WIDTHS: int = 24
 WIDTH_VAL_STRIDE: int = 3     # every 3rd width held out -> 8 val, 16 train
 

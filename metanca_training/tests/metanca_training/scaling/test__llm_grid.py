@@ -35,7 +35,7 @@ def test_width_grid():
     grid = build_width_grid()
     ds = [a.d_model for a in grid]
     assert len(ds) == 24 and len(set(ds)) == 24 and ds == sorted(ds)
-    assert ds[0] == 32 and ds[-1] == 256
+    assert ds[0] == 32 and ds[-1] == 224
     for a in grid:
         assert a.num_heads == WIDTH_HEADS and a.mlp_ratio == WIDTH_MLP_RATIO
         assert a.d_model % 8 == 0 and 8 <= a.d_model // a.num_heads <= 64
