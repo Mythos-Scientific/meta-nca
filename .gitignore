@@ -5,7 +5,7 @@
 *.jpg
 *.pckl
 
-.sw[op]
+*.sw[op]
 .py[cx]
 .ruff_cache
 .mypy_cache
@@ -23,6 +23,7 @@ local_rule_checkpoints/
 .worktrees/
 
 .venv/
+experiments/scaling/data/
 results/
 .superpowers/
 .jax_cache/

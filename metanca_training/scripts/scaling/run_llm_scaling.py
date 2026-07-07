@@ -30,13 +30,14 @@ WIDTH_SUBSET_SEED = 20260706  # width study: per-rep shuffle seed base (rep-only
 
 
 def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int,
-              scheduler_rate: int = 30):
+              scheduler_rate: int = 30, lr: float | None = None):
     register_configs()
     with initialize_config_dir(version_base=None, config_dir=CONFIG_DIR):
         return compose(
             config_name="config",
             overrides=[
                 "dataset=fashion_mnist", "wandb=disabled",
+                *([f"training.lr={lr}"] if lr is not None else []),
                 f"training.num_metaepochs={metaepochs}",
                 "training.update_step_scheduler_type=increment",
                 f"training.update_step_scheduler_rate={scheduler_rate}",
@@ -74,6 +75,8 @@ def main() -> None:
                         "(h=4, r=4 fixed; 24 widths; interleaved val; nested T-subsets)")
     p.add_argument("--metaepochs", type=int, default=330)
     p.add_argument("--increment-rate", type=int, default=30)
+    p.add_argument("--lr", type=float, default=None,
+                   help="meta-optimizer lr override (config default: training.lr=1e-3)")
     p.add_argument("--wandb-suffix", type=str, default="v10k-m330",
                    help="appended to wandb run name/id so each study config gets fresh runs")
     p.add_argument("--batch-size", type=int, default=512)
@@ -117,7 +120,8 @@ def main() -> None:
     mvlm = load_multi_vocab_shakespeare(args.data_dir, batch_size=args.batch_size)
     ctx = mvlm.context_length
 
-    cfg = build_cfg(run_name, args.metaepochs, seed, ctx, scheduler_rate=args.increment_rate)
+    cfg = build_cfg(run_name, args.metaepochs, seed, ctx, scheduler_rate=args.increment_rate,
+                    lr=args.lr)
     # Log every scaling run to wandb (project: architecture-scaling-ablation). Use the run_name
     # as a stable id + resume="allow" so a resumed run continues the same wandb run. Smoke runs
     # stay disabled.
@@ -130,6 +134,7 @@ def main() -> None:
         config={
             "study": "llm_shakespeare_width" if width_study else "llm_shakespeare",
             "T": args.T, "rep": args.rep, "seed": seed, "metaepochs": args.metaepochs,
+            "lr": (args.lr if args.lr is not None else float(cfg.training.lr)),
             **({"widths": [a.d_model for a in build_width_grid()],
                 "train_widths": [a.d_model for a in train_archs]} if width_study else
                {"d_models": list(D_MODELS), "heads": list(HEADS), "vocabs": list(VOCABS),

@@ -1,0 +1,248 @@
+%==============================================================================
+% Architecture Scaling Ablation — Beamer template deck
+%
+% Build:   latexmk -pdf main.tex      (or)   pdflatex main.tex
+% Figures live in ../figures (see \graphicspath below).
+%==============================================================================
+\documentclass[aspectratio=169,11pt]{beamer}
+
+%------------------------------------------------------------------------------
+% Theme & appearance
+%------------------------------------------------------------------------------
+\usetheme{default}
+\usecolortheme{seahorse}
+\setbeamertemplate{navigation symbols}{}      % drop the nav clutter
+\setbeamertemplate{caption}[numbered]
+\setbeamertemplate{itemize items}[circle]
+\setbeamerfont{title}{series=\bfseries}
+\setbeamerfont{frametitle}{series=\bfseries}
+
+%------------------------------------------------------------------------------
+% Packages
+%------------------------------------------------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\graphicspath{{../figures/}{../figures/scaling/}}
+
+% Footer with author / short title / slide number
+\setbeamertemplate{footline}{%
+  \leavevmode%
+  \hbox{%
+    \begin{beamercolorbox}[wd=.4\paperwidth,ht=2.25ex,dp=1ex,leftskip=1em]{author in head/foot}%
+      \usebeamerfont{author in head/foot}\insertshortauthor%
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.45\paperwidth,ht=2.25ex,dp=1ex,center]{title in head/foot}%
+      \usebeamerfont{title in head/foot}\insertshorttitle%
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.15\paperwidth,ht=2.25ex,dp=1ex,rightskip=1em,right]{date in head/foot}%
+      \usebeamerfont{date in head/foot}\insertframenumber{}\,/\,\inserttotalframenumber%
+    \end{beamercolorbox}%
+  }%
+  \vskip0pt%
+}
+
+%------------------------------------------------------------------------------
+% Title metadata
+%------------------------------------------------------------------------------
+\title[MetaNCA architecture scaling]{MetaNCA architecture scaling}
+\subtitle{Capacity, depth, and held-out architecture generalization}
+\author[D.~Berenberg]{Dan Berenberg}
+\institute{Mythos Scientific}
+\date{\today}
+
+%==============================================================================
+\begin{document}
+
+%------------------------------------------------------------------------------
+% 1. Title slide
+%------------------------------------------------------------------------------
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+%------------------------------------------------------------------------------
+% 2. Bulleted text template
+%------------------------------------------------------------------------------
+\begin{frame}{General questions for this study}
+  \framesubtitle{Characterizing the scaling laws of MetaNCA}
+
+  \begin{itemize}
+    \item Weight transformer should ``scale'' similar to language models
+      \begin{itemize}
+        \item Text tokens $\rightarrow$ MetaNCA cells $=$ task network parameters
+        \item Text documents $\rightarrow$ task network architectures
+      \end{itemize}
+    \item How does scaling $N_\mathrm{arch}$ or $N_\mathrm{params}$ impact downstream performance?
+        \begin{itemize}
+            \item Validation loss, accuracy, perplexity, bpb, \ldots
+            \item Generalization to unseen architectures: out-of-distribution extrapolation,
+                in-distribution interpolation
+            \item Impact of scaling on training arch. performance
+        \end{itemize}
+  \end{itemize}
+  %\vfill
+  %\begin{block}{Takeaway}
+  %  Use a \alert{block} to highlight the one thing the audience should remember.
+  %\end{block}
+\end{frame}
+
+\begin{frame}{Other questions, not part of this study}
+
+  \begin{itemize}
+    \item Understanding/fixing instability during training
+    \item Characterizing sample pooling
+        \begin{itemize}
+            \item Number of update steps in this setting
+        \end{itemize}
+    \item Update step increment schedule during training
+    \item Other scaling laws for the local rule:
+        \begin{itemize}
+            \item \# of parameters
+            \item \# attn. heads 
+            \item hidden state dize
+            \item architecture / capacity of post-attn. layers
+            \item scaling \# of tasks
+        \end{itemize}
+  \end{itemize}
+  %\vfill
+  %\begin{block}{Takeaway}
+  %  Use a \alert{block} to highlight the one thing the audience should remember.
+  %\end{block}
+\end{frame}
+
+\begin{frame}{FashionMNIST}
+
+  \begin{itemize}
+    \item Small dataset (same size/dimensions as MNIST)
+    \item Train MetaNCA with 1, 2, 4, and 8 architectures
+    \item Task networks: 
+        \begin{itemize}
+            \item All MLPs
+            \item Fixed depth $\ell = 3$
+            \item Nonincreasing \# neurons per layers:
+                $N_\mathrm{neurons} \in \{16, 32, 64, 128 \}$
+        \end{itemize}
+    \item Training:
+        \begin{itemize}
+            \item Learning rate 0.001
+            \item Train for 1.2K metaepochs
+            \item Increment \# update steps every 100 metaepochs until \# updates = 10
+        \end{itemize}
+    \item Validation: 8 validation architectures, tested on val. set
+  \end{itemize}
+\end{frame}
+
+%%------------------------------------------------------------------------------
+%% 3. Left image, right text template
+%%------------------------------------------------------------------------------
+%\begin{frame}{Left image, right text template}
+%  \begin{columns}[T,onlytextwidth]
+%    % --- left: figure ---
+%    \begin{column}{0.55\textwidth}
+%      \centering
+%      \includegraphics[width=\linewidth,height=0.75\textheight,keepaspectratio]%
+%        {fashion_mnist_capacity_x_perf.pdf}
+%      \\[0.3em]
+%      {\footnotesize Capacity vs.\ performance.}
+%    \end{column}
+%    % --- right: text ---
+%    \begin{column}{0.42\textwidth}
+%      \textbf{Reading the figure}
+%      \begin{itemize}
+%        \item What the x-axis encodes.
+%        \item What the trend shows.
+%        \item Why it matters for scaling.
+%      \end{itemize}
+%      \vfill
+%      \emph{Swap the filename above for any figure in \texttt{../figures}.}
+%    \end{column}
+%  \end{columns}
+%\end{frame}
+
+%------------------------------------------------------------------------------
+% 4. Right image, left text template
+%------------------------------------------------------------------------------
+\begin{frame}{FashionMNIST}
+  \framesubtitle{Effect of multiple architectures}
+  \begin{columns}[T,onlytextwidth]
+    % --- left: text ---
+    \begin{column}{0.42\textwidth}
+      \begin{itemize}
+        \item Val. arch. performance scales with the number of training archs
+        \item Saturates around Adam performance
+      \end{itemize}
+    \end{column}
+    % --- right: figure ---
+    \begin{column}{0.55\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.75\textheight,keepaspectratio]%
+        {fashion_mnist_fixed_depth.pdf}
+      \\[0.3em]
+      {\footnotesize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{FashionMNIST}
+  \framesubtitle{Distance to training set}
+  \begin{columns}[T,onlytextwidth]
+    % --- left: text ---
+    \begin{column}{0.45\textwidth}
+      \textbf{Calculating distance}
+      \begin{itemize}
+          \item Each model is a depth $\ell = 4$ MLP with weight matrices $\{ W_i \}_{i=1}^\ell$,
+              where $W_i \in \mathbb{R}^{d_{i-1} \times d_i}$
+            \item $d_0 = 784, d_4 = 10$
+        \item Each MLP is encoded by the vector of its weights' codomains, omitting $d_0$ and $d_4$: $\begin{pmatrix} d_1 & d_2 & d_3 \end{pmatrix}$
+        \item The distance between two MLPs $A$ and $B$ can be calculated by the cosine distance of their architecture vectors.
+      \end{itemize}
+      %\vfill
+      %\begin{block}{Note}
+      %  Mirror of the previous layout — text left, figure right.
+      %\end{block}
+    \end{column}
+    % --- right: figure ---
+    \begin{column}{0.5\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.75\textheight,keepaspectratio]%
+        {fashion_mnist_heldout_arch_perf.pdf}
+      \\[0.3em]
+      {\footnotesize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{FashionMNIST}
+  \framesubtitle{Capacity vs. Performance}
+    \begin{itemize}
+    \item Correlation between \# parameters and downstream performance: strong in train, weaker in val.
+    \end{itemize}
+    \centering
+    \includegraphics[width=\linewidth,height=0.75\textheight,keepaspectratio]%
+    {fashion_mnist_capacity_x_perf.pdf}
+\end{frame}
+
+\begin{frame}{Shakespeare}
+    \begin{columns}[T, onlytextwidth]
+    \begin{column}{0.45\textwidth}
+        \begin{itemize}
+            \item Architecture scaling for language modeling
+            \item 1, 2, 4, and 8 architectures: (3) layer transformers
+            \item $d_\mathrm{model} \in \{ n \in \mathbb{N} \mid 32 \leq n \leq 224, \ n \ \mathrm{mod} \ 8 = 0\}$
+            \item fixed number of heads (4), feedforward multiplier is ($4\times$), vocab size is 10k 
+            \item Train for 330 metaepochs, increment every 30 up to 10 update steps.
+            \item learning rate 3e-4
+        \end{itemize}
+    \end{column}
+        \begin{column}{0.5\textwidth}
+        \includegraphics[width=\linewidth,height=0.75\textheight,keepaspectratio]%
+        {llmw_train_curves_vs_adam.pdf}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\end{document}
