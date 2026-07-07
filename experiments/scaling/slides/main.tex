@@ -122,8 +122,8 @@
     \item Task networks: 
         \begin{itemize}
             \item All MLPs
-            \item Fixed depth $\ell = 3$
-            \item Nonincreasing \# neurons per layers:
+            \item Fixed depth $\ell = 3$ hidden layers
+            \item Nonincreasing \# neurons per layer:
                 $N_\mathrm{neurons} \in \{16, 32, 64, 128 \}$
         \end{itemize}
     \item Training:
@@ -243,6 +243,11 @@
         {llmw_train_curves_vs_adam.pdf}
         \end{column}
     \end{columns}
+    \vfill
+    \begin{block}{Takeaway}
+        The local rule may be underpowered. Currently investigating.
+    \end{block}
+
 \end{frame}
 
 \end{document}
