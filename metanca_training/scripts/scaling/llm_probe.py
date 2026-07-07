@@ -277,6 +277,10 @@ def main() -> None:
     p.add_argument("--corners", type=str, default=None,
                    help="override corner archs as 'd,h,v,r[;d,h,v,r...]' "
                         "(e.g. '256,4,10000,4' to memory-probe the width-study max)")
+    p.add_argument("--rule-layers", type=str, default=None,
+                   help="local-rule hidden layers override as 'h1,h2,h3'")
+    p.add_argument("--pe-dim", type=int, default=None,
+                   help="PE width for d_neuron=d_layer=d_spatial (hidden_dim = 3*pe_dim)")
     p.add_argument("--data-dir", type=str, default="../../data/shakespeare",
                    help="shakespeare data dir, relative to this script's directory by default")
     args = p.parse_args()
@@ -299,7 +303,10 @@ def main() -> None:
     logger.info("loaded shakespeare: ctx=%d vocabs=%s n_train_batches=%d n_val_batches=%d",
                 ctx, mvlm.vocabs, n_batches, n_val_batches)
 
-    cfg = build_cfg("llm_probe", args.metaepochs, seed=0, context_length=ctx)
+    cfg = build_cfg("llm_probe", args.metaepochs, seed=0, context_length=ctx,
+                    rule_layers=([int(x) for x in args.rule_layers.split(",")]
+                                 if args.rule_layers else None),
+                    pe_dim=args.pe_dim)
 
     # Explicit grid-max hidden-state initializer, probed ONCE from LARGEST_LLM_ARCH and shared
     # by every corner + the pool, matching production's shared-initializer convention (see
