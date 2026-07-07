@@ -30,7 +30,8 @@ WIDTH_SUBSET_SEED = 20260706  # width study: per-rep shuffle seed base (rep-only
 
 
 def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int,
-              scheduler_rate: int = 30, lr: float | None = None):
+              scheduler_rate: int = 30, lr: float | None = None,
+              rule_layers: list[int] | None = None):
     register_configs()
     with initialize_config_dir(version_base=None, config_dir=CONFIG_DIR):
         return compose(
@@ -38,6 +39,8 @@ def build_cfg(run_name: str, metaepochs: int, seed: int, context_length: int,
             overrides=[
                 "dataset=fashion_mnist", "wandb=disabled",
                 *([f"training.lr={lr}"] if lr is not None else []),
+                *([f"local_rule.hidden_layers=[{','.join(map(str, rule_layers))}]"]
+                  if rule_layers is not None else []),
                 f"training.num_metaepochs={metaepochs}",
                 "training.update_step_scheduler_type=increment",
                 f"training.update_step_scheduler_rate={scheduler_rate}",
@@ -77,6 +80,10 @@ def main() -> None:
     p.add_argument("--increment-rate", type=int, default=30)
     p.add_argument("--lr", type=float, default=None,
                    help="meta-optimizer lr override (config default: training.lr=1e-3)")
+    p.add_argument("--rule-layers", type=str, default=None,
+                   help="local-rule hidden layers override as 'h1,h2,h3' (config default "
+                        "100,200,100); tags the run name and results dir for the "
+                        "rule-capacity ablation")
     p.add_argument("--wandb-suffix", type=str, default="v10k-m330",
                    help="appended to wandb run name/id so each study config gets fresh runs")
     p.add_argument("--batch-size", type=int, default=512)
@@ -93,10 +100,15 @@ def main() -> None:
 
     seed = 1000 * args.T + args.rep
     width_study = args.grid == "width"
-    run_name = f"scaling_{'llmw' if width_study else 'llm'}_T{args.T}_rep{args.rep}"
+    rule_layers = ([int(x) for x in args.rule_layers.split(",")]
+                   if args.rule_layers else None)
+    rule_tag = f"_r{'x'.join(map(str, rule_layers))}" if rule_layers else ""
+    run_name = f"scaling_{'llmw' if width_study else 'llm'}_T{args.T}_rep{args.rep}{rule_tag}"
     wandb_run_name = f"{run_name}-{args.wandb_suffix}" if args.wandb_suffix else run_name
 
-    run_dir = Path(args.results_dir) / ("llm_width" if width_study else "llm")
+    # rule-capacity ablation runs get their own results dir so plotting over a dir
+    # never mixes rule sizes
+    run_dir = Path(args.results_dir) / (("llm_width" if width_study else "llm") + rule_tag)
     run_dir.mkdir(parents=True, exist_ok=True)
     out = run_dir / f"T{args.T}_rep{args.rep}.jsonl"
     done_marker = run_dir / f"T{args.T}_rep{args.rep}.done"
@@ -121,7 +133,7 @@ def main() -> None:
     ctx = mvlm.context_length
 
     cfg = build_cfg(run_name, args.metaepochs, seed, ctx, scheduler_rate=args.increment_rate,
-                    lr=args.lr)
+                    lr=args.lr, rule_layers=rule_layers)
     # Log every scaling run to wandb (project: architecture-scaling-ablation). Use the run_name
     # as a stable id + resume="allow" so a resumed run continues the same wandb run. Smoke runs
     # stay disabled.
@@ -135,6 +147,7 @@ def main() -> None:
             "study": "llm_shakespeare_width" if width_study else "llm_shakespeare",
             "T": args.T, "rep": args.rep, "seed": seed, "metaepochs": args.metaepochs,
             "lr": (args.lr if args.lr is not None else float(cfg.training.lr)),
+            "rule_layers": list(cfg.local_rule.hidden_layers),
             **({"widths": [a.d_model for a in build_width_grid()],
                 "train_widths": [a.d_model for a in train_archs]} if width_study else
                {"d_models": list(D_MODELS), "heads": list(HEADS), "vocabs": list(VOCABS),
@@ -200,7 +213,8 @@ def main() -> None:
 
     def write_row(r: dict) -> None:
         fout.write(json.dumps({**r, "ablation": "llm", "T": args.T,
-                               "rep": args.rep, "seed": seed}) + "\n")
+                               "rep": args.rep, "seed": seed,
+                               "rule_layers": list(cfg.local_rule.hidden_layers)}) + "\n")
         fout.flush()
 
     key, eval_key = jax.random.split(jax.random.key(seed))
