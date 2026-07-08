@@ -47,6 +47,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--val-split", type=float, default=0.1)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--num-epochs", type=int, default=60)
+    p.add_argument("--patience", type=int, default=3,
+                   help="early stopping: stop after this many epochs without val "
+                        "improvement (0 disables)")
     p.add_argument("--log-every-n-steps", type=int, default=50)
     p.add_argument("--wandb-project", default="metanca")
     p.add_argument("--run-name", default=None)
@@ -129,6 +132,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     global_step = 0
     best_val = float("inf")
+    epochs_since_improvement = 0
     for epoch in range(1, args.num_epochs + 1):
         state, tr_loss, tr_ppl, global_step = run_epoch(
             state, train_batches, training=True, global_step=global_step
@@ -136,7 +140,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         _, va_loss, va_ppl, _ = run_epoch(
             state, val_batches, training=False, global_step=global_step
         )
-        best_val = min(best_val, va_loss)
+        if va_loss < best_val:
+            best_val = va_loss
+            epochs_since_improvement = 0
+        else:
+            epochs_since_improvement += 1
         print(
             f"epoch {epoch:3d} | train_loss={tr_loss:.4f} train_ppl={tr_ppl:.2f} "
             f"| val_loss={va_loss:.4f} val_ppl={va_ppl:.2f} | best_val={best_val:.4f}",
@@ -153,6 +161,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             },
             step=global_step,
         )
+        if args.patience > 0 and epochs_since_improvement >= args.patience:
+            print(
+                f"early stopping at epoch {epoch}: no val improvement for "
+                f"{args.patience} epochs (best_val={best_val:.4f})",
+                flush=True,
+            )
+            break
+    wandb.summary["best_val/loss"] = best_val
     wandb.finish()
 
 
