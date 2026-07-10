@@ -92,4 +92,9 @@ def evaluate_llm_pool(
         if on_row is not None:
             on_row(row)          # durable incremental write before continuing
         rows.append(row)
+        # eval is strictly one-arch-at-a-time: drop this arch's tasknet AND its
+        # jit-compiled programs (never reused — the next arch has new shapes) so
+        # peak memory is a single architecture, not an accumulating cache.
+        del tasknet
+        jax.clear_caches()
     return rows
