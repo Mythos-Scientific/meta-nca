@@ -89,6 +89,10 @@ def main() -> None:
                    help="local-rule hidden layers override as 'h1,h2,h3' (config default "
                         "100,200,100); tags the run name and results dir for the "
                         "rule-capacity ablation")
+    p.add_argument("--train-widths", type=str, default=None,
+                   help="width grid only: comma-separated d_models to train on, overriding "
+                        "the nested rep-subset (must be train-pool widths; e.g. '56'). "
+                        "--T must match the count. Tags run name and results dir.")
     p.add_argument("--pe-dim", type=int, default=None,
                    help="per-channel PE width for d_neuron=d_layer=d_spatial (config "
                         "default 10 -> hidden_dim 30); hidden_dim = 3*pe_dim; tags the "
@@ -114,6 +118,8 @@ def main() -> None:
     rule_tag = f"_r{'x'.join(map(str, rule_layers))}" if rule_layers else ""
     if args.pe_dim is not None:
         rule_tag += f"_h{3 * args.pe_dim}"  # tag by resulting hidden_dim
+    if args.train_widths is not None:
+        rule_tag += f"_w{'x'.join(args.train_widths.split(','))}"
     run_name = f"scaling_{'llmw' if width_study else 'llm'}_T{args.T}_rep{args.rep}{rule_tag}"
     wandb_run_name = f"{run_name}-{args.wandb_suffix}" if args.wandb_suffix else run_name
 
@@ -129,9 +135,21 @@ def main() -> None:
 
     if width_study:
         pool, val_archs = split_width_grid()
-        # subset seed depends on the rep ONLY: within a rep, T-subsets are nested prefixes
-        train_archs = nested_width_subset(pool, args.T, rep_seed=WIDTH_SUBSET_SEED + args.rep)
-        largest_arch = build_width_grid()[-1]  # d_model=256 provisions the shared initializer
+        if args.train_widths is not None:
+            widths = [int(w) for w in args.train_widths.split(",")]
+            by_width = {a.d_model: a for a in pool}
+            missing = [w for w in widths if w not in by_width]
+            if missing:
+                raise SystemExit(f"--train-widths {missing} not in the train pool "
+                                 f"{sorted(by_width)}")
+            if len(widths) != args.T:
+                raise SystemExit(f"--train-widths count {len(widths)} != --T {args.T}")
+            train_archs = [by_width[w] for w in widths]
+        else:
+            # subset seed depends on the rep ONLY: within a rep, T-subsets are nested prefixes
+            train_archs = nested_width_subset(pool, args.T,
+                                              rep_seed=WIDTH_SUBSET_SEED + args.rep)
+        largest_arch = build_width_grid()[-1]  # grid max provisions the shared initializer
     else:
         pool, val_archs = split_llm_grid(SPLIT_SEED)
         train_archs = sample_llm_subset(pool, args.T, seed=seed)
